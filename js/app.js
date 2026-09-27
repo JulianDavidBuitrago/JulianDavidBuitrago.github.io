@@ -64,6 +64,7 @@ function renderAuth(mode = "login") {
         <div class="flex items-center gap-3 mb-10">${logo()}</div>
         <h1 class="font-display text-3xl text-white mb-2">${mode === "login" ? "Bienvenido de nuevo" : mode === "register" ? "Cree su cuenta" : "Recuperar contraseña"}</h1>
         <p class="text-slate-400 mb-8">${mode === "login" ? "Su mesa lo está esperando. Cada día cuenta." : mode === "register" ? "El mejor momento para empezar es hoy." : "Le enviaremos un enlace a su correo."}</p>
+        ${/FBAN|FBAV|Instagram|WhatsApp|Line\/|; wv\)/i.test(navigator.userAgent) ? `<div class="rounded-xl border border-rose-400/30 bg-rose-500/5 p-3 text-xs text-rose-100 mb-6">${ic("circle-alert", "w-4 h-4 inline mr-1")}Abrió el enlace dentro de otra aplicación (WhatsApp, Instagram…). Para iniciar sesión con Google, toque los tres puntos (⋮) y elija <strong>Abrir en Chrome</strong> o <strong>Abrir en Safari</strong>.</div>` : ""}
         ${local ? `<div class="rounded-xl border border-amber-400/30 bg-amber-400/5 p-3 text-xs text-amber-100 mb-6">${ic("info", "w-4 h-4 inline mr-1")}Modo local: Firebase aún no está configurado en <code>js/config.js</code>. Los datos se guardarán solo en este navegador.</div>` : ""}
         <form id="authForm" class="space-y-4">
           ${mode === "register" ? `<div><label class="label" for="a_name">Nombre</label><input id="a_name" name="name" class="input" required autocomplete="name"></div>` : ""}
@@ -126,7 +127,10 @@ function renderShell() {
 
     <header class="lg:hidden sticky top-0 z-30 glass border-b border-white/5 px-4 py-3 flex items-center justify-between">
       <div class="flex items-center gap-2 scale-90 origin-left">${logo()}</div>
-      <div id="topLevel" class="text-right"></div>
+      <div class="flex items-center gap-3">
+        ${!DB.readOnly && DB.sharedWithMe?.length ? `<button class="relative icon-btn !text-violet-300" data-action="account" aria-label="Cuentas compartidas conmigo">${ic("users", "w-5 h-5")}<span class="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-violet-500 text-[10px] leading-4 text-white text-center">${DB.sharedWithMe.length}</span></button>` : ""}
+        <div id="topLevel" class="text-right"></div>
+      </div>
     </header>
 
     ${DB.readOnly ? `<div class="ro-banner px-4 sm:px-6 lg:px-10 py-2.5 flex items-center gap-3 text-xs sm:text-sm text-violet-100">
@@ -217,7 +221,7 @@ const GLOBAL = {
 };
 
 /* Acciones permitidas en modo solo lectura (navegación y consulta) */
-const RO_OK = new Set(["go", "more", "filter", "tab", "range", "open", "open-session", "history", "account", "switch", "logout", "verify"]);
+const RO_OK = new Set(["go", "more", "filter", "tab", "range", "open", "open-session", "history", "account", "switch", "logout", "verify:send", "verify:check"]);
 
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-action]");
@@ -292,6 +296,7 @@ DB.init(async (user) => {
   if (!user) return renderAuth();
   app.innerHTML = splash("Preparando su mesa…");
   try {
+    await DB.refreshVerification();
     DB.sharedWithMe = await DB.listSharedWithMe();
     const saved = DB.savedContext();
     let ctx = DB.sharedWithMe.find((s) => s.ownerUid === saved) || null;
@@ -306,7 +311,19 @@ DB.init(async (user) => {
 function start() {
   document.body.classList.toggle("ro", DB.readOnly);
   renderShell();
-  if (!DB.readOnly && !DB.profile.onboarded) onboarding();
+  if (!DB.readOnly && !DB.profile.onboarded) return onboarding();
+  announceNewShares();
+}
+
+/* Si alguien compartió una cuenta nueva con este correo, se avisa una sola vez */
+function announceNewShares() {
+  if (DB.readOnly || !DB.sharedWithMe?.length) return;
+  const key = `rack21:seen:${DB.user.uid}`;
+  let seen = [];
+  try { seen = JSON.parse(localStorage.getItem(key) || "[]"); } catch {}
+  const fresh = DB.sharedWithMe.filter((x) => !seen.includes(x.id));
+  localStorage.setItem(key, JSON.stringify(DB.sharedWithMe.map((x) => x.id)));
+  if (fresh.length) accountPicker(`${fresh.map((x) => `<strong class="text-white">${esc(x.ownerName)}</strong>`).join(", ")} ${fresh.length === 1 ? "le compartió su cuenta" : "le compartieron sus cuentas"} en modo solo lectura. Elija cuál quiere ver:`);
 }
 
 async function switchAccount(ownerUid) {
@@ -318,11 +335,11 @@ async function switchAccount(ownerUid) {
   start();
 }
 
-function accountPicker() {
+function accountPicker(intro = "") {
   const opts = [{ ownerUid: "", ownerName: "Mi cuenta", modules: null, mine: true }, ...(DB.sharedWithMe || [])];
   modal({
-    title: "Cambiar de cuenta",
-    body: `<div class="space-y-2">${opts.map((o) => {
+    title: intro ? "Cuenta compartida con usted" : "Cambiar de cuenta",
+    body: `${intro ? `<p class="text-sm text-slate-300 mb-4">${intro}</p>` : ""}<div class="space-y-2">${opts.map((o) => {
       const active = o.mine ? !DB.readOnly : DB.readOnly && DB.ownerUid === o.ownerUid;
       return `<button class="session ${active ? "session-on" : ""}" data-action="switch" data-owner="${esc(o.ownerUid)}">
         <span class="flex items-center gap-2 text-sm text-white">${ic(o.mine ? "user" : "eye", "w-4 h-4")}${esc(o.ownerName)}${o.mine ? "" : ' <span class="badge badge-later ml-1">Solo lectura</span>'}</span>

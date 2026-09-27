@@ -30,6 +30,43 @@ function renderViewer() {
   </div>`;
 }
 
+const appUrl = () => location.origin + location.pathname;
+function inviteText(x) {
+  return `Hola 👋 Te compartí mi cuenta de RACK 21 en modo solo lectura.\n\n1. Entra a: ${appUrl()}\n2. Inicia sesión con este correo: ${x.viewerEmail}\n   (con "Continuar con Google" o creando una cuenta con ese correo)\n3. Si creas la cuenta con contraseña, abre el correo de verificación que te llega y luego pulsa "Ya verifiqué mi correo" (también está en Ajustes).\n\nAl entrar verás mi información con una franja morada de "Solo lectura".`;
+}
+function inviteModal(x) {
+  const txt = inviteText(x);
+  const m = modal({
+    title: "Invitar a la persona",
+    body: `<p class="text-sm text-slate-300 mb-3">RACK 21 no envía correos de invitación. Envíele este mensaje por el medio que prefiera:</p>
+      <pre class="whitespace-pre-wrap text-xs text-slate-200 bg-black/30 border border-white/10 rounded-xl p-3 mb-4 font-sans">${esc(txt)}</pre>
+      <div class="grid sm:grid-cols-3 gap-2">
+        <a class="btn btn-primary" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(txt)}">${ic("message-circle", "w-4 h-4")}WhatsApp</a>
+        <a class="btn btn-ghost" href="mailto:${esc(x.viewerEmail)}?subject=${encodeURIComponent("Acceso de solo lectura a RACK 21")}&body=${encodeURIComponent(txt)}">${ic("mail", "w-4 h-4")}Correo</a>
+        <button class="btn btn-ghost" id="copyInvite">${ic("copy", "w-4 h-4")}Copiar</button>
+      </div>`
+  });
+  m.querySelector("#copyInvite").onclick = async () => {
+    try { await navigator.clipboard.writeText(txt); toast("Mensaje copiado"); } catch { toast("No se pudo copiar; seleccione el texto manualmente", "error"); }
+  };
+}
+
+function sharedWithMeHTML() {
+  const list = DB.sharedWithMe || [];
+  let warn = "";
+  if (DB.mode === "firebase" && !DB.user.emailVerified) warn = `<div class="rounded-xl border border-amber-400/30 bg-amber-400/5 p-3 text-sm text-amber-100 space-y-3">
+      <p>${ic("mail-warning", "w-4 h-4 inline mr-1")}Su correo <strong>${esc(DB.user.email)}</strong> aún no está verificado. Por seguridad, las cuentas que le compartan no aparecerán hasta que lo verifique.</p>
+      <div class="flex flex-wrap gap-2"><button class="btn btn-sm btn-primary" data-action="verify:send">${ic("send", "w-3.5 h-3.5")}Enviarme el correo de verificación</button>
+      <button class="btn btn-sm btn-ghost" data-action="verify:check">${ic("refresh-cw", "w-3.5 h-3.5")}Ya verifiqué mi correo</button></div>
+      <p class="text-xs text-amber-200/70">Revise también las carpetas Spam y Promociones.</p></div>`;
+  else if (DB.shareStatus === "error") warn = `<div class="rounded-xl border border-rose-400/30 bg-rose-500/5 p-3 text-sm text-rose-100">${ic("circle-alert", "w-4 h-4 inline mr-1")}No se pudieron consultar las cuentas compartidas (${esc(DB.shareError || "permisos")}). El administrador del proyecto debe publicar las reglas actualizadas de <code>firestore.rules</code> en Firebase.</div>`;
+  return `${warn}
+    ${list.length ? `<ul class="space-y-2">${list.map((x) => `<li class="row"><div class="w-9 h-9 rounded-xl bg-violet-400/10 text-violet-300 grid place-items-center shrink-0">${ic("eye", "w-4 h-4")}</div>
+      <div class="flex-1 min-w-0"><p class="text-sm text-white truncate">${esc(x.ownerName)}</p><p class="text-[11px] text-slate-500">${(x.modules || []).length} módulos habilitados</p></div>
+      <button class="btn btn-sm btn-ghost" data-action="switch" data-owner="${esc(x.ownerUid)}">${ic("log-in", "w-3.5 h-3.5")}Ver</button></li>`).join("")}</ul>`
+    : !warn ? `<p class="text-sm text-slate-400">Nadie le ha compartido una cuenta con el correo <strong class="text-slate-200">${esc(DB.user.email)}</strong>.</p>` : ""}`;
+}
+
 function sharesHTML() {
   if (myShares === null) return `<p class="text-sm text-slate-500">Cargando accesos…</p>`;
   if (!myShares.length) return `<p class="text-sm text-slate-400">Aún no ha compartido su cuenta con nadie.</p>`;
@@ -41,6 +78,7 @@ function sharesHTML() {
         ${x.note ? `<p class="text-[11px] text-slate-400">${esc(x.note)}</p>` : ""}
         <div class="flex flex-wrap gap-1 mt-1.5">${(x.modules || []).map((m) => `<span class="chip-n !px-2 !py-0.5 text-[10px] text-slate-300">${modLabel(m)}</span>`).join("")}</div>
       </div>
+      <button class="icon-btn !text-emerald-300" data-action="share:invite" data-id="${esc(x.id)}" aria-label="Invitar" title="Enviar invitación">${ic("send", "w-4 h-4")}</button>
       <button class="icon-btn" data-action="share:edit" data-id="${esc(x.id)}" aria-label="Editar acceso">${ic("pencil", "w-4 h-4")}</button>
       <button class="icon-btn hover:!text-rose-300" data-action="share:del" data-id="${esc(x.id)}" aria-label="Quitar acceso">${ic("trash-2", "w-4 h-4")}</button>
     </li>`).join("")}</ul>`;
@@ -74,8 +112,9 @@ function shareForm(x = null) {
     try {
       await DB.saveShare(f.get("email"), mods, f.get("note"));
       closeModal();
-      toast(x ? "Acceso actualizado" : "Acceso concedido. La persona debe iniciar sesión con ese correo.");
+      toast(x ? "Acceso actualizado" : "Acceso concedido. Ahora envíele la invitación.");
       myShares = await DB.listMyShares(); A.changed();
+      if (!x) { const nx = myShares.find((y) => y.viewerEmail === String(f.get("email")).trim().toLowerCase()); if (nx) inviteModal(nx); }
     } catch (err) { toast(err.message || "No se pudo guardar", "error"); }
   });
 }
@@ -89,6 +128,12 @@ export function render() {
   ${sectionHead("Ajustes", "Personalice su experiencia, conecte el coach y administre sus datos.")}
 
   <div class="grid lg:grid-cols-2 gap-4 sm:gap-6">
+    <div class="card reveal space-y-4 lg:col-span-2">
+      <h2 class="card-title">${ic("inbox", "w-5 h-5 text-violet-300")}Cuentas compartidas conmigo</h2>
+      <p class="text-xs text-slate-400 -mt-2">Cuentas de otras personas que usted puede consultar en modo solo lectura.</p>
+      ${sharedWithMeHTML()}
+    </div>
+
     <form class="card reveal space-y-4" data-form="profile">
       <h2 class="card-title">${ic("user", "w-5 h-5 text-cyan-300")}Perfil e identidad</h2>
       <div><label class="label" for="p_name">Nombre</label><input id="p_name" name="name" class="input" value="${esc(p.name || DB.user?.displayName || "")}"></div>
@@ -210,6 +255,16 @@ export const actions = {
   seed: async () => { if (await confirmDialog("Se agregarán 7 hábitos con ancla y 10 tareas típicas del hogar. ¿Continuar?", { ok: "Cargar", danger: false })) { await A.seedStarter(); toast("Plan de arranque cargado"); } },
   logout: () => DB.signOut(),
   "share:new": () => shareForm(),
+  "share:invite": (d) => inviteModal(myShares.find((x) => x.id === d.id)),
+  "verify:send": async () => {
+    try { await DB.resendVerification(); toast(`Enviamos el correo de verificación a ${DB.user.email}. Revise también Spam.`, "info"); }
+    catch (e) { toast(e.code?.includes("too-many") ? "Ya se envió hace poco. Espere unos minutos." : (e.message || "No se pudo enviar"), "error"); }
+  },
+  "verify:check": async () => {
+    const ok = await DB.reloadUser();
+    if (ok) { toast("¡Correo verificado! Cargando cuentas compartidas…"); setTimeout(() => location.reload(), 900); }
+    else toast("Aún no aparece verificado. Abra el enlace del correo y vuelva a intentarlo.", "error");
+  },
   "share:edit": (d) => shareForm(myShares.find((x) => x.id === d.id)),
   "share:del": async (d) => {
     const x = myShares.find((y) => y.id === d.id);

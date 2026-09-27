@@ -67,6 +67,7 @@ export const DB = {
       });
     } catch { db = fs.getFirestore(app); }
     this._fb = { auth, fs, a, db };
+    auth.getRedirectResult(a).catch((e) => console.warn("Redirección de Google", e.code || e));
     auth.onAuthStateChanged(a, (u) => {
       this.user = u ? { uid: u.uid, email: low(u.email), displayName: u.displayName || "", emailVerified: u.emailVerified } : null;
       onUser(this.user);
@@ -93,12 +94,21 @@ export const DB = {
     if (this.mode === "local") return true;
     await this._fb.a.currentUser.reload();
     await this._fb.a.currentUser.getIdToken(true);
-    return this._fb.a.currentUser.emailVerified;
+    this.user.emailVerified = this._fb.a.currentUser.emailVerified;
+    return this.user.emailVerified;
   },
   async signInGoogle() {
     if (this.mode === "local") return this._localLogin("demo@rack21.app", "Campeón");
     const { auth, a } = this._fb;
-    await auth.signInWithPopup(a, new auth.GoogleAuthProvider());
+    const provider = new auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    try { await auth.signInWithPopup(a, provider); }
+    catch (e) {
+      // En celulares y navegadores que bloquean ventanas emergentes se usa redirección
+      if (["auth/popup-blocked", "auth/operation-not-supported-in-this-environment", "auth/cancelled-popup-request"].includes(e.code)) {
+        await auth.signInWithRedirect(a, provider);
+      } else throw e;
+    }
   },
   async resetPassword(email) {
     if (this.mode === "local") return;
@@ -218,15 +228,31 @@ export const DB = {
   },
 
   /* Cuentas que otras personas ME han compartido */
+  /* shareStatus: "ok" | "unverified" | "error" — se muestra en Ajustes para diagnóstico */
   async listSharedWithMe() {
+    this.shareStatus = "ok";
     if (!this.user?.email) return [];
     if (this.mode === "local") return this._localShares().filter((s) => s.viewerEmail === this.user.email);
-    if (!this.user.emailVerified) return [];
+    if (!this.user.emailVerified) { this.shareStatus = "unverified"; return []; }
     const { fs, db } = this._fb;
     try {
       const qs = await fs.getDocs(fs.query(fs.collection(db, "shares"), fs.where("viewerEmail", "==", this.user.email)));
       return qs.docs.map((d) => ({ id: d.id, ...d.data() }));
-    } catch (e) { console.warn("No se pudieron leer los accesos compartidos", e); return []; }
+    } catch (e) {
+      console.warn("No se pudieron leer los accesos compartidos", e);
+      this.shareStatus = "error"; this.shareError = e.code || e.message;
+      return [];
+    }
+  },
+
+  /* Actualiza el estado de verificación del correo (por si se verificó en otro dispositivo) */
+  async refreshVerification() {
+    if (this.mode === "local" || !this.user || this.user.emailVerified) return;
+    try {
+      const u = this._fb.a.currentUser;
+      await u.reload();
+      if (u.emailVerified) { await u.getIdToken(true); this.user.emailVerified = true; }
+    } catch (e) { console.warn("No se pudo actualizar la verificación", e); }
   },
 
   async saveShare(email, modules, note = "") {

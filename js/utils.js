@@ -53,9 +53,18 @@ export function md(text) {
     .replace(/(^|[^*])\*(?!\s)(.+?)\*(?!\*)/g, "$1<em>$2</em>")
     .replace(/`(.+?)`/g, "<code>$1</code>");
   const close = () => { if (list) { html += `</${list}>`; list = null; } };
+  let table = null;
+  const closeTable = () => {
+    if (!table) return;
+    const rows = table.filter((r) => !/^\s*\|?\s*:?-{2,}/.test(r)).map((r) => r.trim().replace(/^\||\|$/g, "").split("|").map((c) => inline(c.trim())));
+    html += `<div class="tbl"><table><thead><tr>${rows[0].map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>${rows.slice(1).map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    table = null;
+  };
   for (const raw of lines) {
     const l = raw.trimEnd();
     let m;
+    if (/^\s*\|.*\|\s*$/.test(l)) { close(); (table ||= []).push(l); continue; }
+    closeTable();
     if ((m = l.match(/^\s*[-•*]\s+(.*)/))) { if (list !== "ul") { close(); html += "<ul>"; list = "ul"; } html += `<li>${inline(m[1])}</li>`; continue; }
     if ((m = l.match(/^\s*\d+[.)]\s+(.*)/))) { if (list !== "ol") { close(); html += "<ol>"; list = "ol"; } html += `<li>${inline(m[1])}</li>`; continue; }
     close();
@@ -63,7 +72,7 @@ export function md(text) {
     if (l.trim() === "") continue;
     html += `<p>${inline(l)}</p>`;
   }
-  close();
+  close(); closeTable();
   return html;
 }
 

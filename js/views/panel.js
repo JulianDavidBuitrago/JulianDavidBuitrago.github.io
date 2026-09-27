@@ -228,6 +228,6 @@ export function mount() {
 
 export const actions = {
   range: (d) => { range = d.id; A.changed(); },
-  "open-session": (d) => { sessionStorage.setItem("rack21:session", d.id); location.hash = "#/coach"; },
+  "open-session": (d) => { sessionStorage.setItem("rack21:open", d.id); location.hash = "#/coach"; },
   "commit:del": (d) => A.removeItem("commitments", d.id, "este compromiso")
 };

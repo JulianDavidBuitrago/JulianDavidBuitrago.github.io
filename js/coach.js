@@ -14,7 +14,7 @@ import {
 import {
   AREAS, areaOf, habitScheduled, habitDone, habitStreak, habitRate, choreStatus, freqLabel,
   minutesOn, weeklyExerciseTarget, dayScore, challenge, txFilter, totals, byCategory, byEntity, byMonth,
-  level, transformation, areaBalance
+  level, transformation, areaBalance, taskState, durationLabel
 } from "./logic.js";
 
 const KEY = "rack21:ai";
@@ -54,6 +54,8 @@ export function buildContext() {
       version_2_min: h.twoMin || "", hoy: habitScheduled(h, t) ? (habitDone(h, t) ? "hecho" : "pendiente") : "no programado",
       racha: habitStreak(h), cumplimiento_21d: Math.round(habitRate(h, d21) ?? 0)
     })),
+    tareas_con_fecha: DB.data.tasks.filter((x) => x.status !== "completada").map((x) => ({ tarea: x.title, fecha_fin: x.dueDate, estado: x.status, prioridad: x.priority, duracion: durationLabel(x), situacion: taskState(x).label })),
+    tareas_completadas_30d: DB.data.tasks.filter((x) => x.status === "completada" && x.completedAt && x.completedAt > Date.now() - 30 * 864e5).length,
     hogar: DB.data.chores.filter((c) => c.active !== false).map((c) => ({ tarea: c.name, frecuencia: freqLabel(c.freq), estado: choreStatus(c).label })),
     ejercicio: {
       meta_semanal_min: weeklyExerciseTarget(),

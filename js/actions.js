@@ -6,6 +6,7 @@ import { today, esc, toISO } from "./utils.js";
 import { formModal, confirmDialog, toast, confetti } from "./ui.js";
 import {
   AREAS, TX_CATEGORIES, WORKOUT_TYPES, FREQUENCIES, STARTER_HABITS, STARTER_CHORES,
+  TASK_STATUS, TASK_PRIORITY, DURATION_UNITS,
   logId, habitDone, choreDoneOn, dayScore, challenge
 } from "./logic.js";
 import { APP } from "./config.js";
@@ -61,10 +62,18 @@ export async function toggleHabit(id, date = today()) {
   changed();
 }
 
+let seeding = false;
 export async function seedStarter({ habits = true, chores = true } = {}) {
-  const t = today();
-  if (habits) for (const h of STARTER_HABITS) await DB.add("habits", { ...h, active: true, days: [0, 1, 2, 3, 4, 5, 6], startDate: t });
-  if (chores) for (const c of STARTER_CHORES) await DB.add("chores", { ...c, active: true, startDate: t });
+  if (seeding) return;
+  seeding = true;
+  try {
+    const t = today();
+    const norm = (s) => (s || "").trim().toLowerCase();
+    const hasH = new Set(DB.data.habits.map((h) => norm(h.name)));
+    const hasC = new Set(DB.data.chores.map((c) => norm(c.name)));
+    if (habits) for (const h of STARTER_HABITS) if (!hasH.has(norm(h.name))) await DB.add("habits", { ...h, active: true, days: [0, 1, 2, 3, 4, 5, 6], startDate: t });
+    if (chores) for (const c of STARTER_CHORES) if (!hasC.has(norm(c.name))) await DB.add("chores", { ...c, active: true, startDate: t });
+  } finally { seeding = false; }
   changed();
 }
 
@@ -245,5 +254,51 @@ function celebrateIfPocketed(date, before) {
 export async function startChallenge(date = today()) {
   await DB.saveProfile({ challengeStart: date });
   toast("¡Reto de 21 días iniciado! La mesa está servida.");
+  changed();
+}
+
+/* ------------------------- Tareas únicas ---------------------------- */
+export function taskForm(t = null) {
+  formModal({
+    title: t ? "Editar tarea" : "Nueva tarea",
+    size: "max-w-2xl",
+    values: t || { area: "personal", priority: "media", status: "pendiente", durationUnit: "min", dueDate: today() },
+    fields: [
+      { name: "title", label: "Tarea", required: true, placeholder: "Ej.: Renovar el SOAT de la moto" },
+      { name: "description", label: "Descripción", type: "textarea", rows: 2, placeholder: "Detalles, pasos o notas" },
+      { name: "area", label: "Área", type: "select", options: areaOpts, col: "half" },
+      { name: "priority", label: "Prioridad", type: "select", options: TASK_PRIORITY, col: "half" },
+      { name: "dueDate", label: "Fecha de finalización", type: "date", required: true, col: "half" },
+      { name: "status", label: "Estado", type: "select", options: TASK_STATUS, col: "half" },
+      { name: "duration", label: "Duración estimada", type: "number", min: 0, step: "any", col: "half" },
+      { name: "durationUnit", label: "Unidad", type: "select", options: DURATION_UNITS, col: "half" }
+    ],
+    onSubmit: async (v) => {
+      const wasDone = t?.status === "completada";
+      if (v.status === "completada" && !wasDone) v.completedAt = Date.now();
+      if (v.status !== "completada") v.completedAt = null;
+      if (t) await DB.update("tasks", t.id, v);
+      else await DB.add("tasks", v);
+      toast(t ? "Tarea actualizada" : "Tarea creada. ¿Cuál es el primer paso?");
+      changed();
+    }
+  });
+}
+
+export async function toggleTask(id) {
+  const t = DB.data.tasks.find((x) => x.id === id);
+  if (!t) return;
+  const done = t.status === "completada";
+  await DB.update("tasks", id, { status: done ? "pendiente" : "completada", completedAt: done ? null : Date.now() });
+  if (!done) toast(`¡“${t.title}” completada! Una cosa menos en la mesa.`);
+  changed();
+}
+
+export async function cycleTaskStatus(id) {
+  const t = DB.data.tasks.find((x) => x.id === id);
+  if (!t) return;
+  const order = ["pendiente", "en_progreso", "completada"];
+  const next = order[(order.indexOf(t.status || "pendiente") + 1) % order.length];
+  await DB.update("tasks", id, { status: next, completedAt: next === "completada" ? Date.now() : null });
   changed();
 }

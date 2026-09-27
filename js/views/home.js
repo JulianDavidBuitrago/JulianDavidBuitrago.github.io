@@ -5,7 +5,7 @@ import { today, longDate, esc, money, lastNDays, sum, shortDate, firstName } fro
 import { ic, ball, ring, empty } from "../ui.js";
 import {
   challenge, dayScore, level, habitScheduled, habitDone, habitStreak, missedYesterday, areaOf,
-  choreStatus, minutesOn, weeklyExerciseTarget, txFilter, totals
+  choreStatus, minutesOn, weeklyExerciseTarget, txFilter, totals, taskState, durationLabel
 } from "../logic.js";
 import { greet, dailyMessage, principleOfDay } from "../carnegie.js";
 import * as A from "../actions.js";
@@ -22,6 +22,8 @@ export function rackHTML(ch, size = 38) {
     }).join("")}</div>`).join("")}</div>`;
 }
 
+const can = (m) => !DB.readOnly || (DB.modules || []).includes(m);
+
 export function render() {
   const t = today();
   const name = DB.profile.name || DB.user?.displayName || "";
@@ -35,6 +37,8 @@ export function render() {
   const weekTarget = weeklyExerciseTarget();
   const month = totals(txFilter({ from: `${t.slice(0, 7)}-01`, to: t }));
   const commits = DB.data.commitments.filter((c) => !c.done).slice(-4).reverse();
+  const tasks = DB.data.tasks.map((x) => ({ t: x, s: taskState(x) })).filter((x) => x.s.key !== "done")
+    .sort((a, b) => (a.t.dueDate || "9").localeCompare(b.t.dueDate || "9")).slice(0, 5);
 
   let bestStreak = 0, bestHabit = "";
   DB.data.habits.forEach((h) => { const s = habitStreak(h); if (s > bestStreak) { bestStreak = s; bestHabit = h.name; } });
@@ -105,7 +109,7 @@ export function render() {
           <div>
             <p class="text-xs uppercase tracking-widest text-cyan-300/80 mb-1">${msg.title}</p>
             <p class="text-slate-200 text-sm leading-relaxed">${esc(msg.body)}</p>
-            <button class="link mt-2" data-action="go" data-to="coach">Conversar con el coach ${ic("arrow-right", "w-3.5 h-3.5")}</button>
+            <button class="link mt-2 ${can("coach") ? "" : "hidden"}" data-action="go" data-to="coach">Conversar con el coach ${ic("arrow-right", "w-3.5 h-3.5")}</button>
           </div>
         </div>
       </div>
@@ -119,8 +123,8 @@ export function render() {
     ${quick("habit:new", "anchor", "Nuevo hábito", "from-violet-400/20")}
   </section>
 
-  <section class="grid lg:grid-cols-3 gap-4 sm:gap-6 mb-6 items-start">
-    <div class="card lg:col-span-2 reveal">
+  <section class="grid ${can("habitos") ? "lg:grid-cols-3" : "lg:grid-cols-2"} gap-4 sm:gap-6 mb-6 items-start">
+    ${can("habitos") ? `<div class="card lg:col-span-2 reveal">
       <div class="flex items-center justify-between mb-4">
         <h2 class="card-title">${ic("repeat", "w-5 h-5 text-emerald-300")}Hábitos de hoy</h2>
         <button class="link" data-action="go" data-to="habitos">Gestionar</button>
@@ -128,10 +132,10 @@ export function render() {
       ${habitsToday.length ? `<ul class="space-y-2">${habitsToday.map(habitRow).join("")}</ul>` :
         `<div class="text-center py-8"><p class="text-slate-400 mb-4">Aún no tiene hábitos programados para hoy.</p>
           <div class="flex flex-wrap gap-2 justify-center"><button class="btn btn-primary" data-action="seed:habits">${ic("sparkles", "w-4 h-4")}Cargar plan de arranque</button><button class="btn btn-ghost" data-action="habit:new">Crear el mío</button></div></div>`}
-    </div>
+    </div>` : ""}
 
-    <div class="space-y-4 sm:space-y-6">
-      <div class="card reveal">
+    <div class="space-y-4 sm:space-y-6 ${can("habitos") ? "" : "lg:col-span-2 lg:grid lg:grid-cols-2 lg:gap-6 lg:space-y-0"}">
+      ${can("hogar") ? `<div class="card reveal">
         <div class="flex items-center justify-between mb-4">
           <h2 class="card-title">${ic("house", "w-5 h-5 text-rose-300")}Hogar hoy</h2>
           <button class="link" data-action="go" data-to="hogar">Ver todo</button>
@@ -143,24 +147,36 @@ export function render() {
             <p class="text-[11px] text-slate-500">${c.minutes || "?"} min${c.anchor ? ` · después de ${esc(c.anchor)}` : ""}</p></div>
             <span class="badge badge-${s.key}">${s.label}</span>
           </li>`).join("")}</ul>` : `<p class="text-slate-400 text-sm">Nada pendiente en casa. ¡Mesa limpia!</p>`}
-      </div>
+      </div>` : ""}
 
       <div class="card reveal">
         <h2 class="card-title mb-4">${ic("gauge", "w-5 h-5 text-cyan-300")}Pulso de la semana</h2>
         <div class="space-y-4 text-sm">
-          <div><div class="flex justify-between mb-1"><span class="text-slate-400">Ejercicio 7 días</span><span class="font-mono text-white">${weekMin}/${weekTarget} min</span></div><div class="bar"><span style="--w:${Math.min(100, (weekMin / weekTarget) * 100)}%"></span></div></div>
-          <div class="grid grid-cols-2 gap-3">
+          ${can("ejercicio") ? `<div><div class="flex justify-between mb-1"><span class="text-slate-400">Ejercicio 7 días</span><span class="font-mono text-white">${weekMin}/${weekTarget} min</span></div><div class="bar"><span style="--w:${Math.min(100, (weekMin / weekTarget) * 100)}%"></span></div></div>` : ""}
+          ${can("finanzas") ? `<div class="grid grid-cols-2 gap-3">
             <div class="mini"><span class="mini-l">Ingresos del mes</span><span class="mini-v text-emerald-300">${money(month.inc, true)}</span></div>
             <div class="mini"><span class="mini-l">Gastos del mes</span><span class="mini-v text-orange-300">${money(month.exp, true)}</span></div>
           </div>
-          <div class="mini"><span class="mini-l">Balance del mes</span><span class="mini-v ${month.net >= 0 ? "text-emerald-300" : "text-rose-300"}">${money(month.net)}</span></div>
+          <div class="mini"><span class="mini-l">Balance del mes</span><span class="mini-v ${month.net >= 0 ? "text-emerald-300" : "text-rose-300"}">${money(month.net)}</span></div>` : ""}
         </div>
       </div>
     </div>
   </section>
 
-  <section class="grid lg:grid-cols-2 gap-4 sm:gap-6">
-    <div class="card reveal">
+  ${can("tareas") ? `<section class="card reveal mb-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="card-title">${ic("list-checks", "w-5 h-5 text-cyan-300")}Tareas con fecha</h2>
+      <div class="flex gap-3"><button class="link" data-action="task:new">${ic("plus", "w-3.5 h-3.5")}Nueva</button><button class="link" data-action="go" data-to="tareas">Ver todas</button></div>
+    </div>
+    ${tasks.length ? `<ul class="grid md:grid-cols-2 gap-2">${tasks.map(({ t, s }) => `
+      <li class="row"><button class="check" data-action="task:toggle" data-id="${t.id}" aria-label="Completar ${esc(t.title)}">${ic("check", "w-4 h-4")}</button>
+        <div class="flex-1 min-w-0"><p class="text-sm text-white truncate">${esc(t.title)}</p><p class="text-[11px] text-slate-500">${t.dueDate ? shortDate(t.dueDate) : "Sin fecha"}${durationLabel(t) ? ` · ${durationLabel(t)}` : ""}</p></div>
+        <span class="badge badge-${s.key}">${s.label}</span></li>`).join("")}</ul>`
+    : `<p class="text-slate-400 text-sm">Sin tareas pendientes con fecha. Agregue trámites, pagos o entregas para no olvidarlos.</p>`}
+  </section>` : ""}
+
+  <section class="grid ${can("coach") ? "lg:grid-cols-2" : ""} gap-4 sm:gap-6">
+    ${can("coach") ? `<div class="card reveal">
       <div class="flex items-center justify-between mb-4">
         <h2 class="card-title">${ic("handshake", "w-5 h-5 text-amber-300")}Compromisos con el coach</h2>
         <button class="link" data-action="go" data-to="coach">Abrir chat</button>
@@ -169,7 +185,7 @@ export function render() {
         <li class="row"><button class="check" data-action="commit:toggle" data-id="${c.id}" aria-label="Cumplir compromiso">${ic("check", "w-4 h-4")}</button>
         <p class="flex-1 text-sm text-slate-200">${esc(c.text)}</p><span class="text-[11px] text-slate-500">${shortDate(c.date)}</span></li>`).join("")}</ul>`
       : `<p class="text-slate-400 text-sm">Cuando el coach le sugiera acciones, guárdelas aquí con un toque y márquelas al cumplirlas.</p>`}
-    </div>
+    </div>` : ""}
     <div class="card reveal bg-gradient-to-br from-violet-500/10 to-cyan-500/5">
       <p class="text-xs uppercase tracking-widest text-violet-300 mb-2">Principio del día</p>
       <h3 class="font-display text-xl text-white mb-2">${pr.t}</h3>

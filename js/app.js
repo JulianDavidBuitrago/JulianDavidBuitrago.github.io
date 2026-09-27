@@ -12,6 +12,7 @@ import * as A from "./actions.js";
 import * as Home from "./views/home.js";
 import * as Habits from "./views/habits.js";
 import * as Chores from "./views/chores.js";
+import * as Tasks from "./views/tasks.js";
 import * as Finance from "./views/finance.js";
 import * as Exercise from "./views/exercise.js";
 import * as Goals from "./views/goals.js";
@@ -23,6 +24,7 @@ const ROUTES = {
   inicio:    { label: "Inicio",     icon: "layout-dashboard", view: Home },
   habitos:   { label: "Hábitos",    icon: "repeat",           view: Habits },
   hogar:     { label: "Hogar",      icon: "house",            view: Chores },
+  tareas:    { label: "Tareas",     icon: "list-checks",      view: Tasks },
   finanzas:  { label: "Finanzas",   icon: "wallet",           view: Finance },
   ejercicio: { label: "Ejercicio",  icon: "dumbbell",         view: Exercise },
   metas:     { label: "Metas",      icon: "target",           view: Goals },
@@ -30,7 +32,10 @@ const ROUTES = {
   coach:     { label: "Coach IA",   icon: "bot",              view: Coach },
   ajustes:   { label: "Ajustes",    icon: "settings",         view: Settings }
 };
-const MOBILE = ["inicio", "habitos", "coach", "panel"];
+const MOBILE_PREF = ["inicio", "habitos", "coach", "panel", "tareas", "hogar", "finanzas", "ejercicio", "metas"];
+/* Rutas visibles: todas para el dueño; en solo lectura, solo los módulos habilitados + Ajustes */
+const visible = () => Object.keys(ROUTES).filter((id) => !DB.readOnly || id === "ajustes" || (DB.modules || []).includes(id));
+const mobileRoutes = () => MOBILE_PREF.filter((id) => visible().includes(id)).slice(0, 4);
 
 const app = document.getElementById("app");
 let route = "inicio";
@@ -114,8 +119,8 @@ function renderShell() {
   <div class="min-h-dvh lg:pl-72">
     <aside class="sidebar hidden lg:flex">
       <div class="flex items-center gap-3 px-6 pt-7 pb-8">${logo()}</div>
-      <nav class="flex-1 px-4 space-y-1" aria-label="Principal">${Object.entries(ROUTES).map(([id, r]) =>
-        `<a href="#/${id}" class="nav-link" data-nav="${id}">${ic(r.icon, "w-5 h-5")}<span>${r.label}</span>${id === "coach" ? '<span class="ml-auto nav-pill">IA</span>' : ""}</a>`).join("")}</nav>
+      <nav class="flex-1 px-4 space-y-1 overflow-y-auto" aria-label="Principal">${visible().map((id) => [id, ROUTES[id]]).map(([id, r]) =>
+        `<a href="#/${id}" class="nav-link" data-nav="${id}">${ic(r.icon, "w-5 h-5")}<span>${r.label}</span>${id === "coach" && !DB.readOnly ? '<span class="ml-auto nav-pill">IA</span>' : ""}</a>`).join("")}</nav>
       <div class="p-4"><div id="sideLevel" class="side-level"></div></div>
     </aside>
 
@@ -124,10 +129,14 @@ function renderShell() {
       <div id="topLevel" class="text-right"></div>
     </header>
 
+    ${DB.readOnly ? `<div class="ro-banner px-4 sm:px-6 lg:px-10 py-2.5 flex items-center gap-3 text-xs sm:text-sm text-violet-100">
+      ${ic("eye", "w-4 h-4 shrink-0 text-violet-300")}<span class="flex-1 min-w-0 truncate">Solo lectura · cuenta de <strong class="text-white">${esc(DB.share.ownerName || "")}</strong></span>
+      <button class="link !text-violet-200 shrink-0" data-action="account">${ic("repeat", "w-3.5 h-3.5")}Cambiar</button></div>`
+    : DB.sharedWithMe?.length ? `<div class="hidden lg:flex justify-end px-10 pt-4 -mb-6"><button class="link text-xs" data-action="account">${ic("users", "w-3.5 h-3.5")}Cuentas compartidas conmigo (${DB.sharedWithMe.length})</button></div>` : ""}
     <main id="view" class="px-4 sm:px-6 lg:px-10 py-6 lg:py-10 pb-28 lg:pb-10 max-w-[1500px] mx-auto"></main>
 
     <nav class="bottom-nav lg:hidden" aria-label="Navegación móvil">
-      ${MOBILE.map((id) => `<a href="#/${id}" class="bn-link ${id === "coach" ? "bn-coach" : ""}" data-nav="${id}">${ic(ROUTES[id].icon, "w-5 h-5")}<span>${ROUTES[id].label.replace(" IA", "").replace(" BI", "")}</span></a>`).join("")}
+      ${mobileRoutes().map((id) => `<a href="#/${id}" class="bn-link ${id === "coach" ? "bn-coach" : ""}" data-nav="${id}">${ic(ROUTES[id].icon, "w-5 h-5")}<span>${ROUTES[id].label.replace(" IA", "").replace(" BI", "")}</span></a>`).join("")}
       <button class="bn-link" data-action="more">${ic("menu", "w-5 h-5")}<span>Más</span></button>
     </nav>
   </div>`;
@@ -137,10 +146,11 @@ function renderShell() {
 
 function navigate() {
   const r = (location.hash.replace(/^#\/?/, "") || "inicio").split("?")[0];
-  route = ROUTES[r] ? r : "inicio";
+  const vis = visible();
+  route = vis.includes(r) ? r : vis[0];
   document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === route));
   const more = document.querySelector('[data-action="more"]');
-  more?.classList.toggle("active", !MOBILE.includes(route));
+  more?.classList.toggle("active", !mobileRoutes().includes(route));
   closeModal();
   paint(true);
   window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
@@ -186,7 +196,7 @@ window.addEventListener("rack:changed", () => paint(false));
 const GLOBAL = {
   go: (d) => { location.hash = `#/${d.to}`; },
   more: () => {
-    const extra = Object.entries(ROUTES).filter(([id]) => !MOBILE.includes(id));
+    const extra = visible().filter((id) => !mobileRoutes().includes(id)).map((id) => [id, ROUTES[id]]);
     modal({
       title: "Más secciones",
       body: `<div class="grid grid-cols-3 gap-3">${extra.map(([id, r]) => `<a href="#/${id}" class="more-tile ${route === id ? "active" : ""}">${ic(r.icon, "w-6 h-6")}<span>${r.label}</span></a>`).join("")}</div>`
@@ -199,8 +209,15 @@ const GLOBAL = {
   "tx:new": (d) => A.txForm(null, d.kind || "gasto", d.entity || "personal"),
   "workout:new": () => A.workoutForm(),
   "goal:new": (d) => A.goalForm(null, d.area),
-  "commit:toggle": (d) => A.toggleCommitment(d.id)
+  "commit:toggle": (d) => A.toggleCommitment(d.id),
+  "task:new": () => A.taskForm(),
+  "task:toggle": (d) => A.toggleTask(d.id),
+  account: () => accountPicker(),
+  switch: (d) => switchAccount(d.owner || null)
 };
+
+/* Acciones permitidas en modo solo lectura (navegación y consulta) */
+const RO_OK = new Set(["go", "more", "filter", "tab", "range", "open", "open-session", "history", "account", "switch", "logout", "verify"]);
 
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-action]");
@@ -210,6 +227,7 @@ document.addEventListener("click", (e) => {
   const fn = v?.actions?.[name] || GLOBAL[name];
   if (!fn) return;
   e.preventDefault();
+  if (DB.readOnly && !RO_OK.has(name)) { toast("Modo solo lectura: esta cuenta solo se puede consultar.", "info"); return; }
   Promise.resolve(fn({ ...el.dataset }, el, e)).catch((err) => { console.error(err); toast(err.message || "Algo salió mal", "error"); });
 });
 document.addEventListener("change", (e) => {
@@ -234,6 +252,7 @@ function onboarding() {
     body: `
       <div class="flex justify-center mb-5">${[1, 2, 3].map((n) => ball(n, { size: 40 })).join("")}</div>
       <p class="text-slate-300 mb-6 text-sm leading-relaxed">En los próximos 21 días va a construir una versión más saludable, ordenada y próspera de sí mismo. Cada día que cumpla su plan embocará una bola. Empecemos por lo esencial:</p>
+      ${DB.mode === "firebase" && !DB.user.emailVerified ? `<div class="rounded-xl border border-violet-400/30 bg-violet-400/5 p-3 text-xs text-violet-100 mb-4">${ic("eye", "w-4 h-4 inline mr-1")}¿Alguien le compartió su cuenta para consultarla? Verifique su correo con el enlace que le enviamos y luego pulse <button type="button" class="link !text-xs" id="obVerify">Ya verifiqué mi correo</button>.</div>` : ""}
       <form id="obForm" class="space-y-4">
         <div><label class="label" for="ob_name">¿Cómo le gusta que le llamen?</label><input id="ob_name" name="name" class="input" required value="${esc(name)}"></div>
         <div><label class="label" for="ob_id">¿Quién quiere ser al día 21? <span class="text-slate-500">(identidad)</span></label><input id="ob_id" name="identity" class="input" placeholder="Soy una persona saludable, ordenada y dueña de sus números"></div>
@@ -248,8 +267,15 @@ function onboarding() {
       </form>`
   });
   m.querySelector("[data-close]")?.remove();
+  m.querySelector("#obVerify")?.addEventListener("click", async () => {
+    if (await DB.reloadUser()) location.reload();
+    else { try { await DB.resendVerification(); } catch {} toast("Aún no aparece verificado. Le reenviamos el correo de verificación.", "info"); }
+  });
   m.querySelector("#obForm").addEventListener("submit", async (e) => {
     e.preventDefault();
+    const sb = e.target.querySelector("button[type=submit]");
+    if (sb.disabled) return;
+    sb.disabled = true;
     const f = new FormData(e.target);
     const patch = { name: f.get("name"), identity: f.get("identity"), why: f.get("why"), onboarded: true, exerciseDaily: 30, exerciseWeekly: 180 };
     if (f.get("start")) patch.challengeStart = today();
@@ -265,8 +291,43 @@ function onboarding() {
 DB.init(async (user) => {
   if (!user) return renderAuth();
   app.innerHTML = splash("Preparando su mesa…");
-  try { await DB.loadAll(); }
-  catch (e) { console.error(e); toast("No se pudieron cargar los datos. Revise su conexión.", "error"); }
-  renderShell();
-  if (!DB.profile.onboarded) onboarding();
+  try {
+    DB.sharedWithMe = await DB.listSharedWithMe();
+    const saved = DB.savedContext();
+    let ctx = DB.sharedWithMe.find((s) => s.ownerUid === saved) || null;
+    await DB.useContext(ctx);
+    // Quien solo tiene cuentas compartidas (sin cuenta propia configurada) entra directo en modo lectura
+    if (!ctx && !DB.profile.onboarded && DB.sharedWithMe.length && saved === null) await DB.useContext(DB.sharedWithMe[0]);
+  } catch (e) { console.error(e); toast("No se pudieron cargar los datos. Revise su conexión.", "error"); }
+  start();
 }).catch((e) => { console.error(e); app.innerHTML = splash("Error al iniciar Firebase. Revise js/config.js", true); });
+
+/* ------------------------- Cuentas compartidas ------------------------- */
+function start() {
+  document.body.classList.toggle("ro", DB.readOnly);
+  renderShell();
+  if (!DB.readOnly && !DB.profile.onboarded) onboarding();
+}
+
+async function switchAccount(ownerUid) {
+  closeModal();
+  app.innerHTML = splash("Cambiando de cuenta…");
+  const share = ownerUid ? DB.sharedWithMe.find((s) => s.ownerUid === ownerUid) : null;
+  try { await DB.useContext(share); } catch (e) { console.error(e); toast("No fue posible abrir esa cuenta.", "error"); }
+  location.hash = "#/inicio";
+  start();
+}
+
+function accountPicker() {
+  const opts = [{ ownerUid: "", ownerName: "Mi cuenta", modules: null, mine: true }, ...(DB.sharedWithMe || [])];
+  modal({
+    title: "Cambiar de cuenta",
+    body: `<div class="space-y-2">${opts.map((o) => {
+      const active = o.mine ? !DB.readOnly : DB.readOnly && DB.ownerUid === o.ownerUid;
+      return `<button class="session ${active ? "session-on" : ""}" data-action="switch" data-owner="${esc(o.ownerUid)}">
+        <span class="flex items-center gap-2 text-sm text-white">${ic(o.mine ? "user" : "eye", "w-4 h-4")}${esc(o.ownerName)}${o.mine ? "" : ' <span class="badge badge-later ml-1">Solo lectura</span>'}</span>
+        ${o.mine ? `<span class="block text-[11px] text-slate-500 mt-0.5">Su propia cuenta, con acceso completo</span>` : `<span class="block text-[11px] text-slate-500 mt-0.5">${o.modules.length} módulos habilitados</span>`}
+      </button>`;
+    }).join("")}</div>`
+  });
+}

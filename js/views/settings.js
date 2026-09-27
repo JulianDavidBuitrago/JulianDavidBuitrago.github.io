@@ -1,13 +1,87 @@
 /* RACK 21 · Ajustes: perfil, reto, coach IA y datos */
-import { DB } from "../store.js";
+import { DB, SHARE_MODULES } from "../store.js";
 import { APP } from "../config.js";
 import { esc, today, shortDate } from "../utils.js";
-import { ic, sectionHead, toast, confirmDialog } from "../ui.js";
+import { ic, sectionHead, toast, confirmDialog, modal, closeModal } from "../ui.js";
 import { aiSettings, saveAiSettings, askClaude } from "../coach.js";
 import { challenge } from "../logic.js";
 import * as A from "../actions.js";
 
+let myShares = null;
+const modLabel = (id) => SHARE_MODULES.find((m) => m.id === id)?.label.replace(/ \(.*\)/, "") || id;
+
+function renderViewer() {
+  const sh = DB.share;
+  return `
+  ${sectionHead("Ajustes", "Está consultando una cuenta compartida en modo de solo lectura.")}
+  <div class="grid lg:grid-cols-2 gap-4 sm:gap-6">
+    <div class="card reveal space-y-4">
+      <h2 class="card-title">${ic("eye", "w-5 h-5 text-violet-300")}Acceso de solo lectura</h2>
+      <p class="text-sm text-slate-300">Cuenta de <strong class="text-white">${esc(sh.ownerName)}</strong>. Puede consultar la información, pero no crear, editar ni eliminar registros.</p>
+      <div><p class="label">Módulos habilitados por el administrador</p>
+        <div class="flex flex-wrap gap-2">${sh.modules.map((m) => `<span class="chip chip-on">${modLabel(m)}</span>`).join("")}</div></div>
+      <button class="btn btn-ghost" data-action="account">${ic("repeat", "w-4 h-4")}Cambiar de cuenta</button>
+    </div>
+    <div class="card reveal space-y-4">
+      <h2 class="card-title">${ic("shield", "w-5 h-5 text-slate-300")}Mi sesión</h2>
+      <p class="text-sm text-slate-400">Sesión iniciada como <strong class="text-white">${esc(DB.user?.email || "")}</strong></p>
+      <button class="btn btn-danger" data-action="logout">${ic("log-out", "w-4 h-4")}Cerrar sesión</button>
+    </div>
+  </div>`;
+}
+
+function sharesHTML() {
+  if (myShares === null) return `<p class="text-sm text-slate-500">Cargando accesos…</p>`;
+  if (!myShares.length) return `<p class="text-sm text-slate-400">Aún no ha compartido su cuenta con nadie.</p>`;
+  return `<ul class="space-y-2">${myShares.map((x) => `
+    <li class="row !items-start">
+      <div class="w-9 h-9 rounded-xl bg-violet-400/10 text-violet-300 grid place-items-center shrink-0">${ic("eye", "w-4 h-4")}</div>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm text-white truncate">${esc(x.viewerEmail)}</p>
+        ${x.note ? `<p class="text-[11px] text-slate-400">${esc(x.note)}</p>` : ""}
+        <div class="flex flex-wrap gap-1 mt-1.5">${(x.modules || []).map((m) => `<span class="chip-n !px-2 !py-0.5 text-[10px] text-slate-300">${modLabel(m)}</span>`).join("")}</div>
+      </div>
+      <button class="icon-btn" data-action="share:edit" data-id="${esc(x.id)}" aria-label="Editar acceso">${ic("pencil", "w-4 h-4")}</button>
+      <button class="icon-btn hover:!text-rose-300" data-action="share:del" data-id="${esc(x.id)}" aria-label="Quitar acceso">${ic("trash-2", "w-4 h-4")}</button>
+    </li>`).join("")}</ul>`;
+}
+
+function shareForm(x = null) {
+  const sel = x?.modules || ["inicio", "habitos", "hogar", "tareas", "ejercicio", "metas", "panel"];
+  const m = modal({
+    title: x ? "Editar acceso de solo lectura" : "Compartir en modo solo lectura",
+    size: "max-w-xl",
+    body: `<form id="shareForm" class="space-y-4">
+      <div><label class="label" for="sh_email">Correo de la persona <span class="text-rose-400">*</span></label>
+        <input id="sh_email" name="email" type="email" class="input" required value="${esc(x?.viewerEmail || "")}" ${x ? "readonly" : ""} placeholder="persona@correo.com"></div>
+      <div><label class="label" for="sh_note">Nota (opcional)</label><input id="sh_note" name="note" class="input" value="${esc(x?.note || "")}" placeholder="Ej.: Contadora, entrenador, pareja…"></div>
+      <div><p class="label">Módulos que podrá ver</p>
+        <div class="grid sm:grid-cols-2 gap-2">${SHARE_MODULES.map((mm) => `
+          <label class="flex items-center gap-2.5 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 cursor-pointer hover:border-cyan-400/40">
+            <input type="checkbox" name="mod" value="${mm.id}" ${sel.includes(mm.id) ? "checked" : ""} class="w-4 h-4 accent-cyan-400">
+            <span class="text-sm text-slate-200">${mm.label}</span></label>`).join("")}</div>
+        <p class="text-xs text-slate-500 mt-2">Inicio y Panel BI muestran solo la información de los módulos que habilite.</p></div>
+      <div class="flex gap-3 justify-end pt-2"><button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+        <button type="submit" class="btn btn-primary">${ic("check", "w-4 h-4")}${x ? "Guardar cambios" : "Conceder acceso"}</button></div>
+    </form>`
+  });
+  m.querySelector("[type=button][data-close]").onclick = closeModal;
+  m.querySelector("#shareForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const mods = f.getAll("mod");
+    if (!mods.length) return toast("Seleccione al menos un módulo", "error");
+    try {
+      await DB.saveShare(f.get("email"), mods, f.get("note"));
+      closeModal();
+      toast(x ? "Acceso actualizado" : "Acceso concedido. La persona debe iniciar sesión con ese correo.");
+      myShares = await DB.listMyShares(); A.changed();
+    } catch (err) { toast(err.message || "No se pudo guardar", "error"); }
+  });
+}
+
 export function render() {
+  if (DB.readOnly) return renderViewer();
   const p = DB.profile;
   const ai = aiSettings();
   const ch = challenge();
@@ -62,6 +136,16 @@ export function render() {
       </div>
     </form>
 
+    <div class="card reveal space-y-4 lg:col-span-2">
+      <div class="flex flex-wrap justify-between gap-3 items-start">
+        <div><h2 class="card-title">${ic("users", "w-5 h-5 text-violet-300")}Usuarios de solo lectura</h2>
+        <p class="text-xs text-slate-400 mt-1 max-w-2xl">Comparta su información con otra persona (familiar, contador, entrenador) para que solo la consulte. Usted elige qué módulos ve; no podrá crear, editar ni eliminar nada.</p></div>
+        <button class="btn btn-primary" data-action="share:new">${ic("user-plus", "w-4 h-4")}Agregar usuario</button>
+      </div>
+      <div id="sharesBox">${sharesHTML()}</div>
+      <p class="text-[11px] text-slate-500">La persona entra a RACK 21 con ese mismo correo (Google o correo verificado) y verá su cuenta en modo lectura. Puede quitarle el acceso cuando quiera.</p>
+    </div>
+
     <div class="card reveal space-y-4">
       <h2 class="card-title">${ic("database", "w-5 h-5 text-amber-300")}Sus datos</h2>
       <p class="text-sm text-slate-400">Modo: <strong class="text-white">${DB.mode === "firebase" ? "Firebase (nube, sincronizado)" : "Local (solo este navegador)"}</strong>. Registros: ${Object.values(DB.data).reduce((s, l) => s + l.length, 0).toLocaleString("es-CO")}.</p>
@@ -81,6 +165,8 @@ export function render() {
 }
 
 export function mount(root) {
+  if (DB.readOnly) return;
+  if (myShares === null) DB.listMyShares().then((l) => { myShares = l; const b = document.getElementById("sharesBox"); if (b) { b.innerHTML = sharesHTML(); import("../ui.js").then((u) => u.icons()); } }).catch(() => { myShares = []; });
   root.querySelector('[data-form="profile"]')?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
@@ -122,5 +208,14 @@ export const actions = {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   },
   seed: async () => { if (await confirmDialog("Se agregarán 7 hábitos con ancla y 10 tareas típicas del hogar. ¿Continuar?", { ok: "Cargar", danger: false })) { await A.seedStarter(); toast("Plan de arranque cargado"); } },
-  logout: () => DB.signOut()
+  logout: () => DB.signOut(),
+  "share:new": () => shareForm(),
+  "share:edit": (d) => shareForm(myShares.find((x) => x.id === d.id)),
+  "share:del": async (d) => {
+    const x = myShares.find((y) => y.id === d.id);
+    if (!(await confirmDialog(`¿Quitar el acceso de ${x?.viewerEmail}? Dejará de ver su información de inmediato.`, { ok: "Quitar acceso" }))) return;
+    await DB.deleteShare(d.id);
+    myShares = await DB.listMyShares();
+    toast("Acceso retirado", "info"); A.changed();
+  }
 };

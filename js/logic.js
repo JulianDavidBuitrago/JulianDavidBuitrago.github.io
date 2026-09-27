@@ -180,7 +180,7 @@ export function challenge() {
 export function points() {
   const d = DB.data;
   let p = d.habitLogs.length * 10 + d.choreLogs.length * 6 + d.workouts.length * 15 + d.transactions.length * 2 +
-    d.commitments.filter((c) => c.done).length * 12 + d.goals.filter((g) => g.status === "lograda").length * 80;
+    d.commitments.filter((c) => c.done).length * 12 + (d.tasks || []).filter((t) => t.status === "completada").length * 8 + d.goals.filter((g) => g.status === "lograda").length * 80;
   const ch = challenge();
   if (ch) p += ch.pocketed * 30;
   return p;
@@ -265,4 +265,33 @@ export function transformation() {
     };
   };
   return { w1: w(0, 6), w2: w(7, 13), w3: w(14, 20) };
+}
+
+/* ------------------------ Tareas únicas (con fecha) --------------------- */
+export const TASK_STATUS = [
+  { v: "pendiente", l: "Pendiente" },
+  { v: "en_progreso", l: "En progreso" },
+  { v: "completada", l: "Completada" }
+];
+export const TASK_PRIORITY = [
+  { v: "alta", l: "Alta" }, { v: "media", l: "Media" }, { v: "baja", l: "Baja" }
+];
+export const DURATION_UNITS = [
+  { v: "min", l: "minutos" }, { v: "h", l: "horas" }, { v: "d", l: "días" }
+];
+export const durationLabel = (t) => {
+  if (!t.duration) return "";
+  const u = DURATION_UNITS.find((x) => x.v === t.durationUnit)?.l || "minutos";
+  return `${t.duration} ${Number(t.duration) === 1 ? u.replace(/s$/, "") : u}`;
+};
+export const durationMinutes = (t) => Number(t.duration || 0) * ({ min: 1, h: 60, d: 480 }[t.durationUnit] || 1);
+
+export function taskState(t) {
+  if (t.status === "completada") return { key: "done", label: "Completada" };
+  if (!t.dueDate) return { key: "later", label: t.status === "en_progreso" ? "En progreso" : "Sin fecha" };
+  const d = diffDays(t.dueDate, today());
+  if (d < 0) return { key: "late", label: `Vencida hace ${-d} d`, days: d };
+  if (d === 0) return { key: "today", label: "Vence hoy", days: 0 };
+  if (d === 1) return { key: "soon", label: "Vence mañana", days: 1 };
+  return { key: d <= 7 ? "soon" : "later", label: `Faltan ${d} días`, days: d };
 }

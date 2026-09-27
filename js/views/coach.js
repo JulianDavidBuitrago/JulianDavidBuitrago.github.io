@@ -1,25 +1,29 @@
 /* RACK 21 · Coach IA (chat con Claude + trazabilidad) */
 import { DB } from "../store.js";
 import { esc, md, uid, firstName, today } from "../utils.js";
-import { ic, toast } from "../ui.js";
+import { ic, toast, modal, closeModal } from "../ui.js";
 import { askClaude, aiReady, aiSettings, extractCommitments, QUICK_PROMPTS } from "../coach.js";
 import { sessions } from "./panel.js";
 import * as A from "../actions.js";
 
 let current = sessionStorage.getItem("rack21:session") || null;
+let fresh = false;   // conversación nueva aún sin mensajes
 let busy = false;
 
 const msgsOf = (s) => DB.data.chat.filter((m) => (m.session || "general") === s).sort((a, b) => a.ts - b.ts);
 
 export function render() {
+  const req = sessionStorage.getItem("rack21:open");
+  if (req) { current = req; fresh = false; sessionStorage.removeItem("rack21:open"); sessionStorage.setItem("rack21:session", req); }
   const ss = sessions();
-  if (!current) current = ss[0]?.id || null;
+  // Si la conversación guardada no existe (p. ej. una nueva sin mensajes), se abre la más reciente
+  if (!current || (!fresh && !ss.some((s) => s.id === current))) current = ss[0]?.id || null;
   const msgs = current ? msgsOf(current) : [];
   const name = firstName(DB.profile.name || DB.user?.displayName) || "campeón";
   const ready = aiReady();
 
   return `
-  <div class="grid lg:grid-cols-[280px_1fr] gap-4 sm:gap-6 h-[calc(100dvh-9.5rem)] lg:h-[calc(100dvh-6rem)] min-h-[520px]">
+  <div class="chat-shell grid lg:grid-cols-[280px_1fr] gap-4 sm:gap-6">
     <aside class="card !p-3 hidden lg:flex flex-col reveal">
       <button class="btn btn-primary w-full mb-3" data-action="new">${ic("message-square-plus", "w-4 h-4")}Nueva conversación</button>
       <p class="text-[11px] uppercase tracking-widest text-slate-500 px-2 mb-2">Historial</p>
@@ -35,15 +39,16 @@ export function render() {
       <header class="flex items-center gap-3 px-4 sm:px-5 py-3 border-b border-white/5">
         <div class="coach-avatar">${ic("bot", "w-5 h-5")}</div>
         <div class="flex-1 min-w-0"><h1 class="text-white font-display tracking-wide text-sm sm:text-base truncate">Coach RACK 21</h1>
-          <p class="text-[11px] ${ready ? "text-emerald-300" : "text-amber-300"} flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full ${ready ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}"></span><span class="truncate">${ready ? `Conectado a Claude<span class="hidden sm:inline"> · lee sus datos en tiempo real</span>` : "Sin configurar"}</span></p></div>
-        <button class="btn btn-sm btn-ghost lg:hidden" data-action="new" aria-label="Nueva conversación">${ic("message-square-plus", "w-4 h-4")}</button>
-        ${ss.length ? `<select class="input !w-28 !py-1.5 text-xs lg:hidden" data-change="session" aria-label="Historial">${ss.map((s) => `<option value="${esc(s.id)}" ${s.id === current ? "selected" : ""}>${esc(s.title.slice(0, 30))}</option>`).join("")}</select>` : ""}
+          <p class="text-[11px] ${DB.readOnly ? "text-violet-300" : ready ? "text-emerald-300" : "text-amber-300"} flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full ${DB.readOnly ? "bg-violet-400" : ready ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}"></span><span class="truncate">${DB.readOnly ? "Historial · solo lectura" : ready ? `Conectado a Claude<span class="hidden sm:inline"> · lee sus datos en tiempo real</span>` : "Sin configurar"}</span></p></div>
+        <button class="btn btn-sm btn-ghost lg:hidden" data-action="history" aria-label="Historial de conversaciones">${ic("history", "w-4 h-4")}<span>${ss.length}</span></button>
+        <button class="btn btn-sm btn-ghost lg:hidden ro-hide" data-action="new" aria-label="Nueva conversación">${ic("message-square-plus", "w-4 h-4")}</button>
       </header>
 
-      <div id="chatScroll" class="flex-1 overflow-y-auto px-4 sm:px-6 py-5 space-y-4">
-        ${!ready ? `<div class="rounded-2xl border border-amber-400/30 bg-amber-400/5 p-4 text-sm text-amber-100">
+      ${current && msgsOf(current).length ? `<div class="lg:hidden px-4 py-2 border-b border-white/5 text-[11px] text-slate-400 truncate">${ic("message-square", "w-3.5 h-3.5 inline mr-1")}${esc(ss.find((x) => x.id === current)?.title || "")}</div>` : ""}
+      <div id="chatScroll" class="flex-1 overflow-y-auto overscroll-contain px-4 sm:px-6 py-5 space-y-4">
+        ${DB.readOnly ? (msgs.length ? "" : `<p class="text-center text-slate-400 text-sm py-10">Aún no hay conversaciones con el coach.</p>`) : !ready ? `<div class="rounded-2xl border border-amber-400/30 bg-amber-400/5 p-4 text-sm text-amber-100">
           ${ic("plug", "w-4 h-4 inline mr-1")}Para activar el coach, configure la conexión con Claude en <button class="link" data-action="go" data-to="ajustes">Ajustes → Coach IA</button>.</div>` : ""}
-        ${msgs.length ? msgs.map(bubble).join("") : `
+        ${msgs.length ? msgs.map(bubble).join("") : DB.readOnly ? "" : `
           <div class="text-center py-6">
             <div class="coach-avatar coach-avatar-lg mx-auto mb-4">${ic("bot", "w-8 h-8")}</div>
             <h2 class="font-display text-xl text-white mb-2">Hola, ${esc(name)}. ¿En qué tiro trabajamos hoy?</h2>
@@ -53,9 +58,9 @@ export function render() {
         ${busy ? `<div class="bubble bubble-ai typing"><span></span><span></span><span></span></div>` : ""}
       </div>
 
-      <form id="chatForm" class="border-t border-white/5 p-3 sm:p-4 flex gap-2 items-end">
+      <form id="chatForm" class="ro-hide border-t border-white/5 p-3 sm:p-4 flex gap-2 items-end">
         <label for="chatInput" class="sr-only">Mensaje para el coach</label>
-        <textarea id="chatInput" rows="1" class="input resize-none max-h-40 flex-1" placeholder="Escriba su pregunta… (Enter para enviar)" ${busy ? "disabled" : ""}></textarea>
+        <textarea id="chatInput" rows="1" class="input chat-input resize-none max-h-40 flex-1" placeholder="Escriba su pregunta…" ${busy ? "disabled" : ""}></textarea>
         <button class="btn btn-primary !px-4 h-[46px]" type="submit" ${busy ? "disabled" : ""} aria-label="Enviar">${ic("send", "w-4 h-4")}</button>
       </form>
     </section>
@@ -81,6 +86,7 @@ async function send(text) {
   if (!text || busy) return;
   if (!aiReady()) { toast("Configure primero el coach en Ajustes → Coach IA", "error"); return; }
   if (!current) current = uid();
+  fresh = false;
   sessionStorage.setItem("rack21:session", current);
   await DB.add("chat", { session: current, role: "user", content: text, ts: Date.now() });
   busy = true; A.changed();
@@ -106,8 +112,19 @@ export function mount(root) {
 }
 
 export const actions = {
-  new: () => { current = uid(); sessionStorage.setItem("rack21:session", current); A.changed(); },
-  open: (d) => { current = d.id; sessionStorage.setItem("rack21:session", current); A.changed(); },
+  new: () => { current = uid(); fresh = true; closeModal(); A.changed(); },
+  open: (d) => { current = d.id; fresh = false; sessionStorage.setItem("rack21:session", current); closeModal(); A.changed(); },
+  history: () => {
+    const ss = sessions();
+    modal({
+      title: "Historial de conversaciones",
+      body: `${DB.readOnly ? "" : `<button class="btn btn-primary w-full mb-4" data-action="new">${ic("message-square-plus", "w-4 h-4")}Nueva conversación</button>`}
+        ${ss.length ? `<div class="space-y-2">${ss.map((s) => `<button class="session ${s.id === current ? "session-on" : ""}" data-action="open" data-id="${esc(s.id)}">
+          <span class="block text-sm text-white line-clamp-2">${esc(s.title)}</span>
+          <span class="block text-[11px] text-slate-500 mt-0.5">${new Date(s.end).toLocaleString("es-CO", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} · ${s.msgs.length} mensajes · ${s.commitments.length} compromisos</span></button>`).join("")}</div>`
+        : `<p class="text-slate-400 text-sm">Todavía no hay conversaciones guardadas.</p>`}`
+    });
+  },
   quick: (d) => send(d.text),
   commit: async (d) => {
     await DB.add("commitments", { text: d.text, source: "coach", session: current, msgId: d.msg, date: today(), done: false });
@@ -115,4 +132,4 @@ export const actions = {
     A.changed();
   }
 };
-export const changes = { session: (v) => actions.open({ id: v }) };
+export const changes = {};

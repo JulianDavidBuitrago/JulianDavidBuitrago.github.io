@@ -4,21 +4,43 @@
    Estructura en Firestore:
      users/{uid}                    → perfil (documento)
      users/{uid}/{colección}/{id}   → registros
+     shares/{correo}_{uidDueño}     → accesos de solo lectura (por módulos)
    ===================================================================== */
 import { firebaseConfig, isFirebaseConfigured } from "./config.js";
 import { uid as makeId } from "./utils.js";
 
 export const COLLECTIONS = [
-  "habits", "habitLogs", "chores", "choreLogs", "businesses", "transactions",
+  "habits", "habitLogs", "chores", "choreLogs", "tasks", "businesses", "transactions",
   "workouts", "goals", "commitments", "chat"
 ];
 
+/* Módulos que el administrador puede habilitar a un usuario de solo lectura
+   y las colecciones que cada uno expone. Inicio y Panel BI muestran un resumen
+   con los datos de los demás módulos habilitados. */
+export const SHARE_MODULES = [
+  { id: "inicio",    label: "Inicio (resumen del día)",  cols: [] },
+  { id: "habitos",   label: "Hábitos",                    cols: ["habits", "habitLogs"] },
+  { id: "hogar",     label: "Hogar",                      cols: ["chores", "choreLogs"] },
+  { id: "tareas",    label: "Tareas",                     cols: ["tasks"] },
+  { id: "finanzas",  label: "Finanzas y negocios",        cols: ["businesses", "transactions"] },
+  { id: "ejercicio", label: "Ejercicio",                  cols: ["workouts"] },
+  { id: "metas",     label: "Metas",                      cols: ["goals"] },
+  { id: "panel",     label: "Panel BI",                   cols: [] },
+  { id: "coach",     label: "Coach IA (historial)",       cols: ["chat", "commitments"] }
+];
+export const colsForModules = (mods) => [...new Set(SHARE_MODULES.filter((m) => mods.includes(m.id)).flatMap((m) => m.cols))];
+
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
+const low = (s) => String(s || "").trim().toLowerCase();
 
 export const DB = {
   mode: isFirebaseConfigured() ? "firebase" : "local",
   user: null,
+  ownerUid: null,       // cuenta cuyos datos se están viendo
+  readOnly: false,      // true cuando se ve la cuenta de otra persona
+  modules: null,        // módulos visibles (null = todos)
+  share: null,          // acceso activo (modo lectura)
   profile: {},
   data: Object.fromEntries(COLLECTIONS.map((c) => [c, []])),
   _fb: null,
@@ -28,6 +50,7 @@ export const DB = {
     if (this.mode === "local") {
       const s = localStorage.getItem("rack21:session");
       this.user = s ? JSON.parse(s) : null;
+      if (this.user) this.user.emailVerified = true;
       onUser(this.user);
       return;
     }
@@ -45,7 +68,7 @@ export const DB = {
     } catch { db = fs.getFirestore(app); }
     this._fb = { auth, fs, a, db };
     auth.onAuthStateChanged(a, (u) => {
-      this.user = u ? { uid: u.uid, email: u.email, displayName: u.displayName || "" } : null;
+      this.user = u ? { uid: u.uid, email: low(u.email), displayName: u.displayName || "", emailVerified: u.emailVerified } : null;
       onUser(this.user);
     });
   },
@@ -60,6 +83,17 @@ export const DB = {
     const { auth, a } = this._fb;
     const cred = await auth.createUserWithEmailAndPassword(a, email, password);
     if (name) await auth.updateProfile(cred.user, { displayName: name });
+    try { await auth.sendEmailVerification(cred.user); } catch {}
+  },
+  async resendVerification() {
+    if (this.mode === "local") return;
+    await this._fb.auth.sendEmailVerification(this._fb.a.currentUser);
+  },
+  async reloadUser() {
+    if (this.mode === "local") return true;
+    await this._fb.a.currentUser.reload();
+    await this._fb.a.currentUser.getIdToken(true);
+    return this._fb.a.currentUser.emailVerified;
   },
   async signInGoogle() {
     if (this.mode === "local") return this._localLogin("demo@rack21.app", "Campeón");
@@ -81,45 +115,69 @@ export const DB = {
     location.reload();
   },
   _localLogin(email, name = "") {
-    this.user = { uid: "local", email: email || "modo-local", displayName: name };
+    const e = low(email) || "modo-local";
+    this.user = { uid: `local-${e}`, email: e, displayName: name };
     localStorage.setItem("rack21:session", JSON.stringify(this.user));
     location.reload();
   },
 
+  /* ------------------------- Contexto de cuenta -------------------------- */
+  /* share = null → mi cuenta; share = {ownerUid, modules,…} → solo lectura */
+  async useContext(share = null) {
+    this.share = share;
+    this.ownerUid = share ? share.ownerUid : this.user.uid;
+    this.readOnly = !!share;
+    this.modules = share ? share.modules : null;
+    localStorage.setItem(`rack21:ctx:${this.user.uid}`, share ? share.ownerUid : "");
+    await this.loadAll();
+  },
+  savedContext() { return localStorage.getItem(`rack21:ctx:${this.user.uid}`); }, // null = nunca eligió
+
+  _guard() { if (this.readOnly) throw new Error("Está en modo de solo lectura: no puede modificar esta cuenta."); },
+
   /* ------------------------------- Datos -------------------------------- */
-  _localKey() { return `rack21:data:${this.user.uid}`; },
+  _localKey(uid = this.ownerUid) { return `rack21:data:${uid}`; },
   _saveLocal() {
     localStorage.setItem(this._localKey(), JSON.stringify({ profile: this.profile, data: this.data }));
   },
-  _col(col) { const { fs, db } = this._fb; return fs.collection(db, "users", this.user.uid, col); },
-  _doc(col, id) { const { fs, db } = this._fb; return fs.doc(db, "users", this.user.uid, col, id); },
+  _col(col) { const { fs, db } = this._fb; return fs.collection(db, "users", this.ownerUid, col); },
+  _doc(col, id) { const { fs, db } = this._fb; return fs.doc(db, "users", this.ownerUid, col, id); },
 
   async loadAll() {
+    if (!this.ownerUid) this.ownerUid = this.user.uid;
+    const allowed = this.readOnly ? colsForModules(this.modules || []) : COLLECTIONS;
     if (this.mode === "local") {
       const raw = JSON.parse(localStorage.getItem(this._localKey()) || "{}");
       this.profile = raw.profile || {};
-      for (const c of COLLECTIONS) this.data[c] = raw.data?.[c] || [];
+      for (const c of COLLECTIONS) this.data[c] = allowed.includes(c) ? (raw.data?.[c] || []) : [];
       return;
     }
     const { fs, db } = this._fb;
-    const snap = await fs.getDoc(fs.doc(db, "users", this.user.uid));
-    this.profile = snap.exists() ? snap.data() : {};
-    const results = await Promise.all(COLLECTIONS.map((c) => fs.getDocs(this._col(c))));
-    results.forEach((qs, i) => {
-      this.data[COLLECTIONS[i]] = qs.docs.map((d) => ({ id: d.id, ...d.data() }));
-    });
+    try {
+      const snap = await fs.getDoc(fs.doc(db, "users", this.ownerUid));
+      this.profile = snap.exists() ? snap.data() : {};
+    } catch (e) { if (!this.readOnly) throw e; this.profile = {}; }
+    await Promise.all(COLLECTIONS.map(async (c) => {
+      if (!allowed.includes(c)) { this.data[c] = []; return; }
+      try {
+        const qs = await fs.getDocs(this._col(c));
+        this.data[c] = qs.docs.map((d) => ({ id: d.id, ...d.data() }));
+      } catch (e) { console.warn(`Sin acceso a ${c}`, e.code || e); this.data[c] = []; }
+    }));
   },
 
   async saveProfile(patch) {
+    this._guard();
     this.profile = { ...this.profile, ...patch, updatedAt: Date.now() };
     if (this.mode === "local") return this._saveLocal();
     const { fs, db } = this._fb;
-    await fs.setDoc(fs.doc(db, "users", this.user.uid), clean(this.profile), { merge: true });
+    await fs.setDoc(fs.doc(db, "users", this.ownerUid), clean(this.profile), { merge: true });
   },
 
   async add(col, data) { return this.set(col, makeId(), { ...data, createdAt: Date.now() }); },
 
   async set(col, id, data) {
+    this._guard();
     const rec = { ...data, id, updatedAt: Date.now() };
     const list = this.data[col];
     const i = list.findIndex((r) => r.id === id);
@@ -136,6 +194,7 @@ export const DB = {
   },
 
   async remove(col, id) {
+    this._guard();
     this.data[col] = this.data[col].filter((r) => r.id !== id);
     if (this.mode === "local") return this._saveLocal();
     await this._fb.fs.deleteDoc(this._doc(col, id));
@@ -146,11 +205,61 @@ export const DB = {
     for (const id of ids) await this.remove(col, id);
   },
 
+  /* --------------------- Accesos de solo lectura ------------------------ */
+  _localShares() { return JSON.parse(localStorage.getItem("rack21:shares") || "[]"); },
+  _saveLocalShares(list) { localStorage.setItem("rack21:shares", JSON.stringify(list)); },
+
+  /* Accesos que YO (dueño) he concedido */
+  async listMyShares() {
+    if (this.mode === "local") return this._localShares().filter((s) => s.ownerUid === this.user.uid);
+    const { fs, db } = this._fb;
+    const qs = await fs.getDocs(fs.query(fs.collection(db, "shares"), fs.where("ownerUid", "==", this.user.uid)));
+    return qs.docs.map((d) => ({ id: d.id, ...d.data() }));
+  },
+
+  /* Cuentas que otras personas ME han compartido */
+  async listSharedWithMe() {
+    if (!this.user?.email) return [];
+    if (this.mode === "local") return this._localShares().filter((s) => s.viewerEmail === this.user.email);
+    if (!this.user.emailVerified) return [];
+    const { fs, db } = this._fb;
+    try {
+      const qs = await fs.getDocs(fs.query(fs.collection(db, "shares"), fs.where("viewerEmail", "==", this.user.email)));
+      return qs.docs.map((d) => ({ id: d.id, ...d.data() }));
+    } catch (e) { console.warn("No se pudieron leer los accesos compartidos", e); return []; }
+  },
+
+  async saveShare(email, modules, note = "") {
+    const viewerEmail = low(email);
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(viewerEmail)) throw new Error("Correo no válido");
+    if (viewerEmail === this.user.email) throw new Error("No puede compartir la cuenta con su propio correo");
+    const rec = {
+      ownerUid: this.user.uid, ownerName: this.profile.name || this.user.displayName || this.user.email,
+      viewerEmail, modules, collections: colsForModules(modules), note, updatedAt: Date.now()
+    };
+    const id = `${viewerEmail}_${this.user.uid}`;
+    if (this.mode === "local") {
+      const list = this._localShares().filter((s) => s.id !== id);
+      list.push({ id, ...rec });
+      this._saveLocalShares(list);
+      return;
+    }
+    const { fs, db } = this._fb;
+    await fs.setDoc(fs.doc(db, "shares", id), rec);
+  },
+
+  async deleteShare(id) {
+    if (this.mode === "local") return this._saveLocalShares(this._localShares().filter((s) => s.id !== id));
+    const { fs, db } = this._fb;
+    await fs.deleteDoc(fs.doc(db, "shares", id));
+  },
+
   exportJSON() {
     return JSON.stringify({ app: "RACK 21", exportedAt: new Date().toISOString(), profile: this.profile, data: this.data }, null, 2);
   },
 
   async importJSON(obj) {
+    this._guard();
     if (!obj?.data) throw new Error("Archivo no válido");
     if (obj.profile) await this.saveProfile(obj.profile);
     for (const c of COLLECTIONS) {

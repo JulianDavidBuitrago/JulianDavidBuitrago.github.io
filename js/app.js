@@ -313,7 +313,7 @@ async function switchAccount(ownerUid) {
   closeModal();
   app.innerHTML = splash("Cambiando de cuenta…");
   const share = ownerUid ? DB.sharedWithMe.find((s) => s.ownerUid === ownerUid) : null;
-  try { await DB.useContext(share); } catch (e) { console.error(e); toast("No fue posible abrir esa cuenta.", "error"); }
+  try { await DB.useContext(share, true); } catch (e) { console.error(e); toast("No fue posible abrir esa cuenta.", "error"); }
   location.hash = "#/inicio";
   start();
 }

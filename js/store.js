@@ -123,12 +123,12 @@ export const DB = {
 
   /* ------------------------- Contexto de cuenta -------------------------- */
   /* share = null → mi cuenta; share = {ownerUid, modules,…} → solo lectura */
-  async useContext(share = null) {
+  async useContext(share = null, remember = false) {
     this.share = share;
     this.ownerUid = share ? share.ownerUid : this.user.uid;
     this.readOnly = !!share;
     this.modules = share ? share.modules : null;
-    localStorage.setItem(`rack21:ctx:${this.user.uid}`, share ? share.ownerUid : "");
+    if (remember) localStorage.setItem(`rack21:ctx:${this.user.uid}`, share ? share.ownerUid : "");
     await this.loadAll();
   },
   savedContext() { return localStorage.getItem(`rack21:ctx:${this.user.uid}`); }, // null = nunca eligió

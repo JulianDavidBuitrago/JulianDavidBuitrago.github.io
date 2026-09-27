@@ -9,6 +9,7 @@ node_modules/
 
 # ── Archivos de desarrollo (no necesarios en producción) ──
 README.md
+usuarios-solo-lectura.md
 firestore.rules
 firebase.json
 worker/

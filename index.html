@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es-CO" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>RACK 21 · Vida en juego</title>
+  <meta name="description" content="RACK 21: hábitos atómicos, hogar, ejercicio, finanzas de negocios y coach IA en un reto de 21 días.">
+  <meta name="theme-color" content="#05070d">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="assets/icon.svg">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body class="bg-ink text-slate-200 antialiased">
+  <div class="bg-scene" aria-hidden="true">
+    <div class="bg-grid"></div>
+    <div class="bg-orb orb-a"></div>
+    <div class="bg-orb orb-b"></div>
+    <div class="bg-orb orb-c"></div>
+  </div>
+  <div id="app"></div>
+  <div id="toasts" class="fixed z-[80] top-4 right-4 left-4 sm:left-auto sm:w-96 flex flex-col gap-2" aria-live="polite"></div>
+  <noscript><p style="padding:2rem;color:#fff">RACK 21 necesita JavaScript habilitado.</p></noscript>
+
+  <script src="vendor/chart.umd.min.js" defer></script>
+  <script src="vendor/lucide.min.js" defer></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "name": "RACK 21 · Vida en juego",
+  "short_name": "RACK 21",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#05070d",
+  "theme_color": "#05070d",
+  "lang": "es-CO",
+  "icons": [{ "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

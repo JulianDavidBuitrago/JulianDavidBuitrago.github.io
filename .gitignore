@@ -1,0 +1,32 @@
+# ── Dependencias ──
+node_modules/
+
+# ── Secretos y configuración local ──
+.env
+.env.*
+.dev.vars
+.wrangler/
+
+# ── Archivos de desarrollo (no necesarios en producción) ──
+README.md
+firestore.rules
+firebase.json
+worker/
+css/input.css
+tailwind.config.js
+package.json
+package-lock.json
+
+# ── Copias de datos exportadas desde la app ──
+rack21-copia-*.json
+
+# ── Registros, sistema y editores ──
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.zip

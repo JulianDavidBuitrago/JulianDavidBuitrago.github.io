@@ -59,7 +59,11 @@ function sharedWithMeHTML() {
       <div class="flex flex-wrap gap-2"><button class="btn btn-sm btn-primary" data-action="verify:send">${ic("send", "w-3.5 h-3.5")}Enviarme el correo de verificación</button>
       <button class="btn btn-sm btn-ghost" data-action="verify:check">${ic("refresh-cw", "w-3.5 h-3.5")}Ya verifiqué mi correo</button></div>
       <p class="text-xs text-amber-200/70">Revise también las carpetas Spam y Promociones.</p></div>`;
-  else if (DB.shareStatus === "error") warn = `<div class="rounded-xl border border-rose-400/30 bg-rose-500/5 p-3 text-sm text-rose-100">${ic("circle-alert", "w-4 h-4 inline mr-1")}No se pudieron consultar las cuentas compartidas (${esc(DB.shareError || "permisos")}). El administrador del proyecto debe publicar las reglas actualizadas de <code>firestore.rules</code> en Firebase.</div>`;
+  else if (DB.shareStatus === "error") warn = DB.shareDiag === "rules"
+    ? `<div class="rounded-xl border border-rose-400/30 bg-rose-500/5 p-3 text-sm text-rose-100 space-y-2">${ic("circle-alert", "w-4 h-4 inline mr-1")}<strong>Firebase está usando reglas antiguas</strong> (${esc(DB.shareError || "permisos")}).
+        <p class="text-xs text-rose-100/80">En Firebase → Firestore Database → Reglas, reemplace todo por el contenido de <code>firestore.rules</code> y pulse <strong>Publicar</strong>. Espere un minuto y recargue.</p></div>`
+    : `<div class="rounded-xl border border-amber-400/30 bg-amber-400/5 p-3 text-sm text-amber-100 space-y-3">${ic("circle-alert", "w-4 h-4 inline mr-1")}Su sesión todavía no refleja la verificación del correo (${esc(DB.shareError || "permisos")}).
+        <div class="flex flex-wrap gap-2"><button class="btn btn-sm btn-primary" data-action="logout">${ic("log-out", "w-3.5 h-3.5")}Cerrar sesión y volver a entrar</button></div></div>`;
   return `${warn}
     ${list.length ? `<ul class="space-y-2">${list.map((x) => `<li class="row"><div class="w-9 h-9 rounded-xl bg-violet-400/10 text-violet-300 grid place-items-center shrink-0">${ic("eye", "w-4 h-4")}</div>
       <div class="flex-1 min-w-0"><p class="text-sm text-white truncate">${esc(x.ownerName)}</p><p class="text-[11px] text-slate-500">${(x.modules || []).length} módulos habilitados</p></div>

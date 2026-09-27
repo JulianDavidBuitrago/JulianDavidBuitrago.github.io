@@ -235,12 +235,25 @@ export const DB = {
     if (this.mode === "local") return this._localShares().filter((s) => s.viewerEmail === this.user.email);
     if (!this.user.emailVerified) { this.shareStatus = "unverified"; return []; }
     const { fs, db } = this._fb;
+    const q = () => fs.getDocs(fs.query(fs.collection(db, "shares"), fs.where("viewerEmail", "==", this.user.email)));
     try {
-      const qs = await fs.getDocs(fs.query(fs.collection(db, "shares"), fs.where("viewerEmail", "==", this.user.email)));
+      const qs = await q();
       return qs.docs.map((d) => ({ id: d.id, ...d.data() }));
     } catch (e) {
+      // 1) El token de sesión puede estar desactualizado (p. ej. correo verificado hace poco): se renueva y se reintenta
+      if (e.code === "permission-denied") {
+        try {
+          await this._fb.a.currentUser.getIdToken(true);
+          const qs = await q();
+          return qs.docs.map((d) => ({ id: d.id, ...d.data() }));
+        } catch (e2) { e = e2; }
+      }
       console.warn("No se pudieron leer los accesos compartidos", e);
       this.shareStatus = "error"; this.shareError = e.code || e.message;
+      // 2) Diagnóstico: si tampoco se pueden leer los accesos propios, las reglas no están publicadas
+      this.shareDiag = "token";
+      try { await fs.getDocs(fs.query(fs.collection(db, "shares"), fs.where("ownerUid", "==", this.user.uid), fs.limit(1))); }
+      catch { this.shareDiag = "rules"; }
       return [];
     }
   },

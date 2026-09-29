@@ -11,6 +11,7 @@ import { uid as makeId } from "./utils.js";
 
 export const COLLECTIONS = [
   "habits", "habitLogs", "chores", "choreLogs", "tasks", "businesses", "transactions",
+  "debts", "funds", "loans", "transfers",
   "workouts", "goals", "commitments", "chat"
 ];
 
@@ -22,7 +23,7 @@ export const SHARE_MODULES = [
   { id: "habitos",   label: "Hábitos",                    cols: ["habits", "habitLogs"] },
   { id: "hogar",     label: "Hogar",                      cols: ["chores", "choreLogs"] },
   { id: "tareas",    label: "Tareas",                     cols: ["tasks"] },
-  { id: "finanzas",  label: "Finanzas y negocios",        cols: ["businesses", "transactions"] },
+  { id: "finanzas",  label: "Finanzas y negocios",        cols: ["businesses", "transactions", "debts", "funds", "loans", "transfers"] },
   { id: "ejercicio", label: "Ejercicio",                  cols: ["workouts"] },
   { id: "metas",     label: "Metas",                      cols: ["goals"] },
   { id: "panel",     label: "Panel BI",                   cols: [] },
@@ -285,6 +286,18 @@ export const DB = {
     }
     const { fs, db } = this._fb;
     await fs.setDoc(fs.doc(db, "shares", id), rec);
+  },
+
+  /* Mantiene los accesos al día cuando la app agrega colecciones nuevas a un módulo */
+  async syncShares() {
+    if (this.readOnly) return;
+    try {
+      const mine = await this.listMyShares();
+      for (const x of mine) {
+        const cols = colsForModules(x.modules || []);
+        if (JSON.stringify([...cols].sort()) !== JSON.stringify([...(x.collections || [])].sort())) await this.saveShare(x.viewerEmail, x.modules, x.note || "");
+      }
+    } catch (e) { console.warn("No se pudieron actualizar los accesos", e); }
   },
 
   async deleteShare(id) {

@@ -289,7 +289,8 @@ export async function toggleTask(id) {
   const t = DB.data.tasks.find((x) => x.id === id);
   if (!t) return;
   const done = t.status === "completada";
-  await DB.update("tasks", id, { status: done ? "pendiente" : "completada", completedAt: done ? null : Date.now() });
+  const items = (t.items || []).map((x) => ({ ...x, done: done ? x.done : true }));
+  await DB.update("tasks", id, { status: done ? (items.some((x) => x.done) ? "en_progreso" : "pendiente") : "completada", completedAt: done ? null : Date.now(), items });
   if (!done) toast(`¡“${t.title}” completada! Una cosa menos en la mesa.`);
   changed();
 }
@@ -299,6 +300,6 @@ export async function cycleTaskStatus(id) {
   if (!t) return;
   const order = ["pendiente", "en_progreso", "completada"];
   const next = order[(order.indexOf(t.status || "pendiente") + 1) % order.length];
-  await DB.update("tasks", id, { status: next, completedAt: next === "completada" ? Date.now() : null });
+  await DB.update("tasks", id, { status: next, completedAt: next === "completada" ? Date.now() : null, items: next === "completada" ? (t.items || []).map((x) => ({ ...x, done: true })) : (t.items || []) });
   changed();
 }

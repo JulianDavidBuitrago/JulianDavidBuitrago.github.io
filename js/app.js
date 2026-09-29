@@ -168,6 +168,7 @@ function paint(anim = false) {
   const scroll = window.scrollY;
   destroyCharts();
   const v = ROUTES[route].view;
+  el.onsubmit = null;
   el.innerHTML = v.render();
   el.classList.toggle("view-anim", anim);
   if (!anim) el.querySelectorAll(".reveal").forEach((r) => r.classList.add("revealed"));
@@ -221,7 +222,7 @@ const GLOBAL = {
 };
 
 /* Acciones permitidas en modo solo lectura (navegación y consulta) */
-const RO_OK = new Set(["go", "more", "filter", "tab", "range", "open", "open-session", "history", "account", "switch", "logout", "verify:send", "verify:check"]);
+const RO_OK = new Set(["go", "more", "filter", "tab", "range", "open", "open-session", "history", "account", "switch", "logout", "verify:send", "verify:check", "ftab", "debt:view", "fund:view", "loan:view"]);
 
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-action]");
@@ -304,6 +305,7 @@ DB.init(async (user) => {
     // Quien solo tiene cuentas compartidas (sin cuenta propia configurada) entra directo en modo lectura
     if (!ctx && !DB.profile.onboarded && DB.sharedWithMe.length && saved === null) await DB.useContext(DB.sharedWithMe[0]);
   } catch (e) { console.error(e); toast("No se pudieron cargar los datos. Revise su conexión.", "error"); }
+  if (!DB.readOnly) DB.syncShares();
   start();
 }).catch((e) => { console.error(e); app.innerHTML = splash("Error al iniciar Firebase. Revise js/config.js", true); });
 

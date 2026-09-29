@@ -170,7 +170,7 @@ export function render() {
     </div>
     ${tasks.length ? `<ul class="grid md:grid-cols-2 gap-2">${tasks.map(({ t, s }) => `
       <li class="row"><button class="check" data-action="task:toggle" data-id="${t.id}" aria-label="Completar ${esc(t.title)}">${ic("check", "w-4 h-4")}</button>
-        <div class="flex-1 min-w-0"><p class="text-sm text-white truncate">${esc(t.title)}</p><p class="text-[11px] text-slate-500">${t.dueDate ? shortDate(t.dueDate) : "Sin fecha"}${durationLabel(t) ? ` · ${durationLabel(t)}` : ""}</p></div>
+        <div class="flex-1 min-w-0"><p class="text-sm text-white truncate">${esc(t.title)}</p><p class="text-[11px] text-slate-500">${t.dueDate ? shortDate(t.dueDate) : "Sin fecha"}${durationLabel(t) ? ` · ${durationLabel(t)}` : ""}${t.items?.length ? ` · <span class="text-cyan-300">${Math.round(t.items.filter((x) => x.done).length / t.items.length * 100)} %</span>` : ""}</p></div>
         <span class="badge badge-${s.key}">${s.label}</span></li>`).join("")}</ul>`
     : `<p class="text-slate-400 text-sm">Sin tareas pendientes con fecha. Agregue trámites, pagos o entregas para no olvidarlos.</p>`}
   </section>` : ""}

@@ -8,6 +8,7 @@
    ===================================================================== */
 import { APP } from "./config.js";
 import { DB } from "./store.js";
+import * as F from "./fin.js";
 import {
   today, addDays, lastNDays, sum, firstName, longDate, toISO
 } from "./utils.js";
@@ -54,7 +55,7 @@ export function buildContext() {
       version_2_min: h.twoMin || "", hoy: habitScheduled(h, t) ? (habitDone(h, t) ? "hecho" : "pendiente") : "no programado",
       racha: habitStreak(h), cumplimiento_21d: Math.round(habitRate(h, d21) ?? 0)
     })),
-    tareas_con_fecha: DB.data.tasks.filter((x) => x.status !== "completada").map((x) => ({ tarea: x.title, fecha_fin: x.dueDate, estado: x.status, prioridad: x.priority, duracion: durationLabel(x), situacion: taskState(x).label })),
+    tareas_con_fecha: DB.data.tasks.filter((x) => x.status !== "completada").map((x) => ({ tarea: x.title, avance_actividades: x.items?.length ? `${x.items.filter((i) => i.done).length}/${x.items.length}` : null, actividades_pendientes: (x.items || []).filter((i) => !i.done).map((i) => i.text).slice(0, 8), fecha_fin: x.dueDate, estado: x.status, prioridad: x.priority, duracion: durationLabel(x), situacion: taskState(x).label })),
     tareas_completadas_30d: DB.data.tasks.filter((x) => x.status === "completada" && x.completedAt && x.completedAt > Date.now() - 30 * 864e5).length,
     hogar: DB.data.chores.filter((c) => c.active !== false).map((c) => ({ tarea: c.name, frecuencia: freqLabel(c.freq), estado: choreStatus(c).label })),
     ejercicio: {
@@ -68,6 +69,11 @@ export function buildContext() {
       negocios: DB.data.businesses.map((b) => b.name),
       mes_actual: { ...roundT(totals(monthTx)), por_entidad: byEntity(monthTx).filter((e) => e.inc || e.exp).map((e) => ({ entidad: e.name, ingresos: e.inc, gastos: e.exp, utilidad: e.net })) },
       gastos_top_30d: byCategory(last30).slice(0, 6).map((c) => `${c.k}: ${Math.round(c.v)}`),
+      saldos_por_cuenta: F.accounts().map((a) => `${a.name}: ${Math.round(F.accountBalance(a.id))}`),
+      patrimonio: (() => { const n = F.netWorth(); return { en_cuentas: Math.round(n.cash), ahorro_prevision: Math.round(n.saved), deudas: Math.round(n.debt), neto: Math.round(n.net) }; })(),
+      deudas: DB.data.debts.map((d) => { const s = F.debtStatus(d); return { deuda: d.name, acreedor: d.creditor, cuenta: d.entity, capital: d.principal, saldo: Math.round(s.balance), tasa: `${d.rate}% ${d.ratePeriod}`, metodo: d.method === "frances" ? "cuota fija" : "interés sobre capital", cuota: Math.round(s.sc.cuota), cuotas_pagadas: `${(d.payments || []).length}/${d.months}`, proximo_pago: s.next?.date, vencida: s.late }; }),
+      rubros_ahorro: DB.data.funds.map((f) => ({ rubro: f.name, tipo: f.kind, saldo: Math.round(F.fundBalance(f)), meta: f.goal || null, fecha_objetivo: f.targetDate || null })),
+      prestamos_entre_cuentas: DB.data.loans.map((l) => { const s = F.loanStatus(l); return { de: l.from, para: l.to, valor: l.amount, pendiente: Math.round(s.balance), vence: l.dueDate || null }; }),
       tendencia_6_meses: byMonth(DB.data.transactions, 6).map((m) => `${m.k} ing ${Math.round(m.inc)} gas ${Math.round(m.exp)}`)
     },
     metas: DB.data.goals.map((g) => ({ meta: g.title, area: areaOf(g.area).label, progreso: g.progress, estado: g.status, fecha_limite: g.deadline, siguiente_accion: g.nextAction })),

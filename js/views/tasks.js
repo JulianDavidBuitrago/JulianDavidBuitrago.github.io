@@ -1,11 +1,17 @@
 /* RACK 21 · Tareas únicas con fecha de finalización */
 import { DB } from "../store.js";
-import { today, esc, shortDate, sum } from "../utils.js";
-import { ic, ball, sectionHead, empty } from "../ui.js";
+import { today, esc, shortDate, sum, uid } from "../utils.js";
+import { ic, ball, sectionHead, empty, toast, confetti } from "../ui.js";
 import { areaOf, taskState, durationLabel, durationMinutes, TASK_STATUS } from "../logic.js";
 import * as A from "../actions.js";
 
 const st = { tab: "activas", q: "" };
+let focusTask = null; // para mantener el cursor en el campo tras agregar una actividad
+
+export const itemsProgress = (t) => {
+  const it = t.items || [];
+  return it.length ? Math.round((it.filter((x) => x.done).length / it.length) * 100) : null;
+};
 const PRIO = { alta: ["Alta", "text-rose-300 border-rose-400/40 bg-rose-500/10"], media: ["Media", "text-amber-200 border-amber-300/30 bg-amber-400/10"], baja: ["Baja", "text-slate-300 border-slate-400/25 bg-slate-400/10"] };
 const statusLabel = (v) => TASK_STATUS.find((s) => s.v === v)?.l || "Pendiente";
 
@@ -65,6 +71,26 @@ export function render() {
 const kpi = (icon, label, v, color) => `<div class="card reveal !p-4"><div class="flex items-center gap-2 text-slate-400 text-xs mb-2">${ic(icon, "w-4 h-4 " + color)}${label}</div><p class="font-display text-3xl text-white">${v.toLocaleString("es-CO")}</p></div>`;
 const tab = (id, label) => `<button class="chip ${st.tab === id ? "chip-on" : ""}" data-action="tab" data-id="${id}">${label}</button>`;
 
+function checklist(t) {
+  const it = t.items || [];
+  const p = itemsProgress(t);
+  return `<div class="checklist mt-4">
+    ${it.length ? `<div class="flex items-center justify-between text-[11px] mb-1.5">
+        <span class="text-slate-400 uppercase tracking-wider">Actividades ${it.filter((x) => x.done).length}/${it.length}</span>
+        <span class="font-mono ${p === 100 ? "text-emerald-300" : "text-cyan-300"}">${p} %</span></div>
+      <div class="bar mb-2"><span style="--w:${p}%"></span></div>
+      <ul class="space-y-1">${it.map((x, i) => `<li class="item-row group">
+        <button class="sub-check ${x.done ? "is-on" : ""}" data-action="item:toggle" data-id="${t.id}" data-item="${x.id}" aria-label="${x.done ? "Desmarcar" : "Marcar"} actividad">${ic("check", "w-3 h-3")}</button>
+        <span class="flex-1 min-w-0 text-sm break-words ${x.done ? "line-through text-slate-500" : "text-slate-200"}"><span class="text-slate-500 font-mono text-xs mr-1">${i + 1}.</span>${esc(x.text)}</span>
+        <button class="item-del" data-action="item:del" data-id="${t.id}" data-item="${x.id}" aria-label="Quitar actividad">${ic("x", "w-3.5 h-3.5")}</button>
+      </li>`).join("")}</ul>` : ""}
+    <form class="add-item flex gap-2 mt-2" data-task="${t.id}">
+      <input name="item" class="input !py-1.5 text-sm min-w-0" placeholder="${it.length ? "Agregar otra actividad…" : "Agregar actividad o paso…"}" aria-label="Nueva actividad" autocomplete="off" maxlength="200">
+      <button class="btn btn-sm btn-ghost shrink-0" type="submit" aria-label="Agregar">${ic("plus", "w-4 h-4")}</button>
+    </form>
+  </div>`;
+}
+
 function card(t, s) {
   const a = areaOf(t.area);
   const done = s.key === "done";
@@ -79,6 +105,7 @@ function card(t, s) {
       <span class="badge ${p[1]}">${p[0]}</span>
     </div>
     ${t.description ? `<p class="text-sm mt-3 ${done ? "text-slate-500 line-through" : "text-slate-300"}">${esc(t.description)}</p>` : ""}
+    ${checklist(t)}
     <div class="grid grid-cols-2 gap-2 mt-4">
       <div class="mini"><span class="mini-l">Finaliza</span><span class="text-sm text-white">${t.dueDate ? shortDate(t.dueDate) : "—"}</span></div>
       <div class="mini"><span class="mini-l">Duración</span><span class="text-sm text-white">${durationLabel(t) || "—"}</span></div>
@@ -96,8 +123,51 @@ function card(t, s) {
   </article>`;
 }
 
+/* Recalcula el estado según el avance de las actividades */
+async function saveItems(t, items) {
+  const all = items.length && items.every((x) => x.done);
+  const any = items.some((x) => x.done);
+  let status = t.status || "pendiente";
+  if (all) status = "completada";
+  else if (status === "completada") status = "en_progreso";
+  else if (any && status === "pendiente") status = "en_progreso";
+  const wasDone = t.status === "completada";
+  await DB.update("tasks", t.id, { items, status, completedAt: status === "completada" ? (t.completedAt || Date.now()) : null });
+  if (status === "completada" && !wasDone) { confetti(); toast(`¡“${t.title}” al 100 %! Tarea cumplida.`); }
+}
+
+export function mount(root) {
+  root.onsubmit = async (e) => {
+    const f = e.target.closest(".add-item");
+    if (!f) return;
+    e.preventDefault();
+    const text = f.item.value.trim();
+    if (!text) return;
+    const t = DB.data.tasks.find((x) => x.id === f.dataset.task);
+    if (!t) return;
+    focusTask = t.id;
+    try { await saveItems(t, [...(t.items || []), { id: uid(), text, done: false }]); A.changed(); }
+    catch (err) { toast(err.message, "error"); }
+  };
+  if (focusTask) {
+    const inp = root.querySelector(`.add-item[data-task="${focusTask}"] input`);
+    focusTask = null;
+    if (inp) inp.focus({ preventScroll: true });
+  }
+}
+
 export const actions = {
   tab: (d) => { st.tab = d.id; A.changed(); },
+  "item:toggle": async (d) => {
+    const t = DB.data.tasks.find((x) => x.id === d.id);
+    await saveItems(t, (t.items || []).map((x) => (x.id === d.item ? { ...x, done: !x.done } : x)));
+    A.changed();
+  },
+  "item:del": async (d) => {
+    const t = DB.data.tasks.find((x) => x.id === d.id);
+    await saveItems(t, (t.items || []).filter((x) => x.id !== d.item));
+    A.changed();
+  },
   "task:cycle": (d) => A.cycleTaskStatus(d.id),
   edit: (d) => A.taskForm(DB.data.tasks.find((t) => t.id === d.id)),
   del: (d) => A.removeItem("tasks", d.id, "esta tarea")

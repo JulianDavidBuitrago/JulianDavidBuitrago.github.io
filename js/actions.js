@@ -2,11 +2,11 @@
    RACK 21 · Acciones CRUD compartidas por todas las vistas
    ===================================================================== */
 import { DB } from "./store.js";
-import { today, esc, toISO } from "./utils.js";
+import { today, esc, toISO, weekday } from "./utils.js";
 import { formModal, confirmDialog, toast, confetti } from "./ui.js";
 import {
   AREAS, TX_CATEGORIES, WORKOUT_TYPES, FREQUENCIES, STARTER_HABITS, STARTER_CHORES,
-  TASK_STATUS, TASK_PRIORITY, DURATION_UNITS,
+  TASK_STATUS, TASK_PRIORITY, DURATION_UNITS, RECURRENCE, recurrence, recurrenceLabel,
   logId, habitDone, choreDoneOn, dayScore, challenge
 } from "./logic.js";
 import { APP } from "./config.js";
@@ -79,20 +79,28 @@ export async function seedStarter({ habits = true, chores = true } = {}) {
 
 /* ------------------------------- Hogar ------------------------------- */
 export function choreForm(c = null) {
+  const r = c ? recurrence(c) : { type: "dias", days: [weekday(today())], every: 2, monthDay: Number(today().slice(8)) };
+  const base = { rtype: r.type, days: r.days, everyWeeks: r.type === "semanas" ? r.every : 2, everyDays: r.type === "intervalo" ? r.every : 3, monthDay: r.monthDay };
+  const vals = c ? { ...c, ...base } : { ...base, minutes: 15 };
   formModal({
     title: c ? "Editar tarea del hogar" : "Nueva tarea del hogar",
-    values: c || { freq: 7, minutes: 15 },
+    values: vals,
     fields: [
-      { name: "name", label: "Tarea", required: true, placeholder: "Ej.: Lavar los baños" },
-      { name: "freq", label: "Frecuencia", type: "select", options: FREQUENCIES.map((f) => ({ v: f.v, l: f.l })), col: "half" },
+      { name: "name", label: "Tarea", required: true, placeholder: "Ej.: Sacar la basura, Pagar facturas" },
+      { name: "rtype", label: "¿Cada cuánto se hace?", type: "select", options: RECURRENCE },
+      { name: "days", label: "¿Qué días?", type: "days", when: { rtype: ["dias", "semanas"] }, hint: "Ej.: sacar la basura miércoles y sábado." },
+      { name: "everyWeeks", label: "Cada cuántas semanas", type: "number", min: 1, max: 12, col: "half", when: { rtype: ["semanas"] } },
+      { name: "everyDays", label: "Cada cuántos días", type: "number", min: 1, max: 90, col: "half", when: { rtype: ["intervalo"] } },
+      { name: "monthDay", label: "Día del mes", type: "number", min: 1, max: 31, col: "half", when: { rtype: ["mensual"] }, hint: "Si el mes es más corto, se programa el último día." },
       { name: "minutes", label: "Minutos estimados", type: "number", min: 1, col: "half" },
       { name: "anchor", label: "Ancla · Después de…", placeholder: "Ej.: poner la lavadora", hint: "Enganche la tarea a algo que ya hace para no tener que acordarse." }
     ],
     onSubmit: async (v) => {
-      v.freq = Number(v.freq);
-      if (c) await DB.update("chores", c.id, v);
-      else await DB.add("chores", { ...v, active: true, startDate: today() });
-      toast(c ? "Tarea actualizada" : "Tarea creada");
+      if (["dias", "semanas"].includes(v.rtype) && !v.days?.length) throw new Error("Elija al menos un día de la semana");
+      const rec = { name: v.name, rtype: v.rtype, days: ["dias", "semanas"].includes(v.rtype) ? v.days : [], every: Math.max(1, Number(v.rtype === "semanas" ? v.everyWeeks : v.everyDays) || 1), monthDay: Math.min(31, Math.max(1, Number(v.monthDay) || 1)), minutes: v.minutes, anchor: v.anchor, freq: null };
+      if (c) await DB.update("chores", c.id, rec);
+      else await DB.add("chores", { ...rec, active: true, startDate: today() });
+      toast(c ? "Tarea actualizada" : `Tarea creada · ${recurrenceLabel(rec)}`);
       changed();
     }
   });

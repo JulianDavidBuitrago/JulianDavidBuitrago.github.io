@@ -5,7 +5,7 @@
 import { APP } from "./config.js";
 import { DB } from "./store.js";
 import {
-  today, addDays, diffDays, dateRange, lastNDays, weekday, monthKey, sum, groupBy, toISO
+  today, addDays, diffDays, dateRange, lastNDays, weekday, monthKey, sum, groupBy, toISO, parseISO
 } from "./utils.js";
 
 /* --------------------------- Catálogos base --------------------------- */
@@ -32,7 +32,6 @@ export const FREQUENCIES = [
   { v: 1, l: "Diaria" }, { v: 2, l: "Cada 2 días" }, { v: 3, l: "Cada 3 días" },
   { v: 4, l: "Cada 4 días" }, { v: 7, l: "Semanal" }, { v: 14, l: "Quincenal" }, { v: 30, l: "Mensual" }
 ];
-export const freqLabel = (v) => FREQUENCIES.find((f) => f.v === Number(v))?.l || `Cada ${v} días`;
 
 export const LEVELS = [
   { min: 0,    name: "Aprendiz de mesa" },
@@ -55,16 +54,17 @@ export const STARTER_HABITS = [
 ];
 
 export const STARTER_CHORES = [
-  { name: "Tender la cama", freq: 1, minutes: 3, anchor: "levantarme" },
-  { name: "Lavar la loza", freq: 1, minutes: 15, anchor: "terminar la cena" },
-  { name: "Sacar la basura", freq: 2, minutes: 5, anchor: "salir de casa en la mañana" },
-  { name: "Barrer", freq: 2, minutes: 15, anchor: "llegar del trabajo" },
-  { name: "Trapear", freq: 4, minutes: 20, anchor: "terminar de barrer" },
-  { name: "Lavar la ropa", freq: 7, minutes: 40, anchor: "desayunar el sábado" },
-  { name: "Lavar los baños", freq: 7, minutes: 30, anchor: "poner la lavadora" },
-  { name: "Limpiar la cocina a fondo", freq: 7, minutes: 30, anchor: "terminar el almuerzo del domingo" },
-  { name: "Cambiar sábanas y toallas", freq: 14, minutes: 15, anchor: "lavar la ropa" },
-  { name: "Limpiar la nevera", freq: 30, minutes: 25, anchor: "hacer el mercado" }
+  { name: "Tender la cama", rtype: "diaria", minutes: 3, anchor: "levantarme" },
+  { name: "Lavar la loza", rtype: "diaria", minutes: 15, anchor: "terminar la cena" },
+  { name: "Sacar la basura", rtype: "dias", days: [3, 6], minutes: 5, anchor: "salir de casa en la mañana" },
+  { name: "Barrer", rtype: "dias", days: [1, 4], minutes: 15, anchor: "llegar del trabajo" },
+  { name: "Trapear", rtype: "dias", days: [4], minutes: 20, anchor: "terminar de barrer" },
+  { name: "Lavar la ropa", rtype: "dias", days: [6], minutes: 40, anchor: "desayunar el sábado" },
+  { name: "Lavar los baños", rtype: "dias", days: [6], minutes: 30, anchor: "poner la lavadora" },
+  { name: "Limpiar la cocina a fondo", rtype: "dias", days: [0], minutes: 30, anchor: "terminar el almuerzo del domingo" },
+  { name: "Cambiar sábanas y toallas", rtype: "semanas", every: 2, days: [0], minutes: 15, anchor: "lavar la ropa" },
+  { name: "Pagar facturas de servicios", rtype: "mensual", monthDay: 5, minutes: 20, anchor: "recibir el pago del mes" },
+  { name: "Limpiar la nevera", rtype: "mensual", monthDay: 1, minutes: 25, anchor: "hacer el mercado" }
 ];
 
 /* -------------------------------- Hábitos ------------------------------ */
@@ -108,26 +108,110 @@ export function choreLastDoneBefore(c, date) {
 }
 export const choreDoneOn = (c, date) => DB.data.choreLogs.some((l) => l.choreId === c.id && l.date === date);
 
+/* Recurrencia de las tareas del hogar
+   rtype: "diaria" | "dias" (días de la semana) | "semanas" (cada N semanas en días elegidos)
+          | "mensual" (día fijo del mes) | "intervalo" (cada N días desde la última vez)
+   Las tareas antiguas (solo "freq") se interpretan automáticamente. */
+export const RECURRENCE = [
+  { v: "diaria", l: "Todos los días" },
+  { v: "dias", l: "Días específicos de la semana" },
+  { v: "semanas", l: "Cada N semanas (en los días elegidos)" },
+  { v: "mensual", l: "Una vez al mes (día fijo)" },
+  { v: "intervalo", l: "Cada N días desde la última vez" }
+];
+
+export function recurrence(c) {
+  if (c.rtype) return { type: c.rtype, days: (c.days || []).map(Number), every: Math.max(1, Number(c.every || 1)), monthDay: Math.min(31, Math.max(1, Number(c.monthDay || 1))) };
+  const f = Number(c.freq || 1), start = createdISO(c), wd = weekday(start);
+  if (f <= 1) return { type: "diaria", days: [], every: 1, monthDay: 1 };
+  if (f === 7) return { type: "dias", days: [wd], every: 1, monthDay: 1 };
+  if (f === 14) return { type: "semanas", days: [wd], every: 2, monthDay: 1 };
+  if (f >= 28) return { type: "mensual", days: [], every: 1, monthDay: Number(start.slice(8)) };
+  return { type: "intervalo", days: [], every: f, monthDay: 1 };
+}
+
+const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+const joinY = (a) => (a.length > 1 ? `${a.slice(0, -1).join(", ")} y ${a[a.length - 1]}` : a[0] || "");
+export function recurrenceLabel(c) {
+  const r = recurrence(c);
+  const dn = [1, 2, 3, 4, 5, 6, 0].filter((d) => r.days.includes(d)).map((d) => DAY_NAMES[d]);
+  switch (r.type) {
+    case "diaria": return "Todos los días";
+    case "dias": return dn.length === 7 ? "Todos los días" : dn.length ? `Cada ${joinY(dn)}` : "Sin días elegidos";
+    case "semanas": return `Cada ${r.every} semanas · ${joinY(dn) || "sin día"}`;
+    case "mensual": return `Cada mes · día ${r.monthDay}`;
+    default: return r.every === 1 ? "Todos los días" : `Cada ${r.every} días`;
+  }
+}
+/* Compatibilidad con código anterior */
+export const freqLabel = (v) => (typeof v === "object" ? recurrenceLabel(v) : FREQUENCIES.find((f) => f.v === Number(v))?.l || `Cada ${v} días`);
+
+const mondayOf = (iso) => { const d = weekday(iso); return addDays(iso, d === 0 ? -6 : 1 - d); };
+const lastDayOfMonth = (iso) => { const d = parseISO(iso); return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); };
+
+/* ¿La tarea está programada para esa fecha? (tipos con calendario fijo) */
+export function occursOn(c, date) {
+  if (c.active === false || date < createdISO(c)) return false;
+  const r = recurrence(c);
+  switch (r.type) {
+    case "diaria": return true;
+    case "dias": return r.days.includes(weekday(date));
+    case "semanas": {
+      if (!r.days.includes(weekday(date))) return false;
+      const w = Math.round(diffDays(mondayOf(date), mondayOf(createdISO(c))) / 7);
+      return w % r.every === 0;
+    }
+    case "mensual": return Number(date.slice(8)) === Math.min(r.monthDay, lastDayOfMonth(date));
+    default: return false;
+  }
+}
+function prevOccurrence(c, date) {
+  const start = createdISO(c);
+  for (let i = 0, d = date; i < 400 && d >= start; i++, d = addDays(d, -1)) if (occursOn(c, d)) return d;
+  return null;
+}
+function nextOccurrence(c, after) {
+  for (let i = 1, d = addDays(after, 1); i < 400; i++, d = addDays(d, 1)) if (occursOn(c, d)) return d;
+  return null;
+}
+
+/* Ciclo actual: fecha pendiente (si la hay) y próxima fecha programada */
+export function choreCycle(c, date = today()) {
+  const r = recurrence(c);
+  const start = createdISO(c);
+  if (r.type === "intervalo") {
+    const logs = choreLogs(c).filter((d) => d <= date);
+    const last = logs.length ? logs[logs.length - 1] : null;
+    const due = last ? addDays(last, r.every) : start;
+    if (last === date) return { pending: null, next: addDays(date, r.every) };
+    return due <= date ? { pending: due, next: due } : { pending: null, next: due };
+  }
+  const occ = prevOccurrence(c, date);
+  const doneSince = occ && choreLogs(c).some((d) => d >= occ && d <= date);
+  if (occ && !doneSince) return { pending: occ, next: occ };
+  return { pending: null, next: nextOccurrence(c, date) || addDays(date, 30) };
+}
+
+/* Para puntajes: la tarea "toca" solo en su día programado, no todos los días */
 export function choreDueOn(c, date) {
   if (c.active === false || date < createdISO(c)) return false;
+  const r = recurrence(c);
+  if (r.type !== "intervalo") return occursOn(c, date);
   const last = choreLastDoneBefore(c, date);
-  if (!last) return true;
-  return diffDays(date, last) >= Number(c.freq || 1);
+  return (last ? addDays(last, r.every) : createdISO(c)) === date;
 }
-export function choreNextDue(c) {
-  const all = choreLogs(c);
-  const last = all.length ? all[all.length - 1] : null;
-  if (!last) return createdISO(c) > today() ? createdISO(c) : today();
-  return addDays(last, Number(c.freq || 1));
-}
+export function choreNextDue(c) { return choreCycle(c).next; }
 export function choreStatus(c) {
   const t = today();
   if (choreDoneOn(c, t)) return { key: "done", label: "Hecha hoy" };
-  const next = choreNextDue(c);
-  const d = diffDays(next, t);
-  if (d < 0) return { key: "late", label: `Atrasada ${-d} d`, days: d };
-  if (d === 0) return { key: "today", label: "Para hoy", days: 0 };
+  const cy = choreCycle(c, t);
+  if (cy.pending) {
+    const d = diffDays(t, cy.pending);
+    return d === 0 ? { key: "today", label: "Para hoy", days: 0 } : { key: "late", label: `Atrasada ${d} d`, days: -d };
+  }
+  const d = diffDays(cy.next, t);
   if (d === 1) return { key: "soon", label: "Mañana", days: 1 };
+  if (d <= 6) return { key: "soon", label: `El ${DAY_NAMES[weekday(cy.next)]}`, days: d };
   return { key: "later", label: `En ${d} días`, days: d };
 }
 

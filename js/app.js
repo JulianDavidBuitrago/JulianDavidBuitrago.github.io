@@ -19,6 +19,7 @@ import * as Goals from "./views/goals.js";
 import * as Panel from "./views/panel.js";
 import * as Coach from "./views/coach.js";
 import * as Settings from "./views/settings.js";
+import * as Admin from "./views/admin.js";
 
 const ROUTES = {
   inicio:    { label: "Inicio",     icon: "layout-dashboard", view: Home },
@@ -30,11 +31,12 @@ const ROUTES = {
   metas:     { label: "Metas",      icon: "target",           view: Goals },
   panel:     { label: "Panel BI",   icon: "chart-pie",        view: Panel },
   coach:     { label: "Coach IA",   icon: "bot",              view: Coach },
-  ajustes:   { label: "Ajustes",    icon: "settings",         view: Settings }
+  ajustes:   { label: "Ajustes",    icon: "settings",         view: Settings },
+  admin:     { label: "Administración", icon: "shield-check", view: Admin }
 };
 const MOBILE_PREF = ["inicio", "habitos", "coach", "panel", "tareas", "hogar", "finanzas", "ejercicio", "metas"];
 /* Rutas visibles: todas para el dueño; en solo lectura, solo los módulos habilitados + Ajustes */
-const visible = () => Object.keys(ROUTES).filter((id) => !DB.readOnly || id === "ajustes" || (DB.modules || []).includes(id));
+const visible = () => Object.keys(ROUTES).filter((id) => id === "admin" ? (!DB.readOnly && DB.isAdmin()) : (!DB.readOnly || id === "ajustes" || (DB.modules || []).includes(id)));
 const mobileRoutes = () => MOBILE_PREF.filter((id) => visible().includes(id)).slice(0, 4);
 
 const app = document.getElementById("app");
@@ -49,6 +51,8 @@ function splash(text, error = false) {
 /* ---------------------------- Autenticación ---------------------------- */
 function renderAuth(mode = "login") {
   const local = DB.mode === "local";
+  const regOpen = DB.appConfig.registrationOpen !== false;
+  const invitedOk = DB.appConfig.allowInvited !== false;
   app.innerHTML = `
   <div class="min-h-dvh grid lg:grid-cols-2">
     <section class="hidden lg:flex relative overflow-hidden felt items-center justify-center p-12">
@@ -75,8 +79,9 @@ function renderAuth(mode = "login") {
         ${mode !== "reset" ? `<div class="flex items-center gap-3 my-6 text-xs text-slate-500"><span class="flex-1 h-px bg-white/10"></span>o<span class="flex-1 h-px bg-white/10"></span></div>
         <button id="gBtn" class="btn btn-ghost w-full">${googleIcon()}Continuar con Google</button>` : ""}
         <div class="mt-8 text-sm text-slate-400 flex flex-wrap gap-x-4 gap-y-2 justify-between">
-          ${mode === "login" ? `<button class="link" data-auth="register">Crear una cuenta</button><button class="link" data-auth="reset">¿Olvidó su contraseña?</button>` : `<button class="link" data-auth="login">Ya tengo cuenta</button>`}
+          ${mode === "login" ? `${regOpen ? `<button class="link" data-auth="register">Crear una cuenta</button>` : invitedOk ? `<button class="link" data-auth="register">¿Le compartieron una cuenta? Regístrese</button>` : ""}<button class="link" data-auth="reset">¿Olvidó su contraseña?</button>` : `<button class="link" data-auth="login">Ya tengo cuenta</button>`}
         </div>
+        ${!regOpen ? `<div class="mt-6 rounded-xl border border-white/10 bg-white/5 p-3 text-xs text-slate-400 flex gap-2">${ic("lock", "w-4 h-4 shrink-0 text-slate-500")}<span>${mode === "register" ? "El registro está cerrado. Solo pueden crear cuenta los correos que recibieron una invitación de solo lectura." : "El registro de nuevos usuarios está cerrado. Si ya tiene cuenta, inicie sesión normalmente."}</span></div>` : ""}
       </div>
     </section>
   </div>`;
@@ -106,6 +111,8 @@ function authError(e) {
   if (c.includes("popup-closed")) return "Se cerró la ventana de Google antes de terminar.";
   if (c.includes("unauthorized-domain")) return "Dominio no autorizado: agréguelo en Firebase → Authentication → Settings.";
   if (c.includes("too-many-requests")) return "Demasiados intentos. Espere unos minutos.";
+  if (c === "registro-cerrado") return e.message;
+  if (c.includes("admin-restricted-operation")) return "El registro está deshabilitado en Firebase. Solicite acceso al administrador.";
   return e?.message || "No fue posible continuar.";
 }
 
@@ -222,7 +229,7 @@ const GLOBAL = {
 };
 
 /* Acciones permitidas en modo solo lectura (navegación y consulta) */
-const RO_OK = new Set(["go", "more", "filter", "tab", "range", "open", "open-session", "history", "account", "switch", "logout", "verify:send", "verify:check", "ftab", "debt:view", "fund:view", "loan:view"]);
+const RO_OK = new Set(["admin", "go", "more", "filter", "tab", "range", "open", "open-session", "history", "account", "switch", "logout", "verify:send", "verify:check", "ftab", "debt:view", "fund:view", "loan:view"]);
 
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-action]");

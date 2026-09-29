@@ -6,7 +6,7 @@
      users/{uid}/{colección}/{id}   → registros
      shares/{correo}_{uidDueño}     → accesos de solo lectura (por módulos)
    ===================================================================== */
-import { firebaseConfig, isFirebaseConfigured } from "./config.js";
+import { firebaseConfig, isFirebaseConfigured, ADMIN_EMAILS } from "./config.js";
 import { uid as makeId } from "./utils.js";
 
 export const COLLECTIONS = [
@@ -43,12 +43,14 @@ export const DB = {
   modules: null,        // módulos visibles (null = todos)
   share: null,          // acceso activo (modo lectura)
   profile: {},
+  appConfig: { registrationOpen: true, allowInvited: true, closedMessage: "" },
   data: Object.fromEntries(COLLECTIONS.map((c) => [c, []])),
   _fb: null,
 
   /* ---------------------------- Autenticación ---------------------------- */
   async init(onUser) {
     if (this.mode === "local") {
+      this.appConfig = { ...this.appConfig, ...JSON.parse(localStorage.getItem("rack21:config") || "{}") };
       const s = localStorage.getItem("rack21:session");
       this.user = s ? JSON.parse(s) : null;
       if (this.user) this.user.emailVerified = true;
@@ -68,7 +70,14 @@ export const DB = {
       });
     } catch { db = fs.getFirestore(app); }
     this._fb = { auth, fs, a, db };
-    auth.getRedirectResult(a).catch((e) => console.warn("Redirección de Google", e.code || e));
+    try {
+      const cs = await fs.getDoc(fs.doc(db, "config", "app"));
+      if (cs.exists()) this.appConfig = { ...this.appConfig, ...cs.data() };
+    } catch (e) { console.warn("No se pudo leer la configuración de la app", e.code || e); }
+    auth.getRedirectResult(a).then((cred) => cred && this._enforceNewUser(cred)).catch((e) => {
+      console.warn("Redirección de Google", e.code || e);
+      if (e.code === "registro-cerrado") alert(e.message);
+    });
     auth.onAuthStateChanged(a, (u) => {
       this.user = u ? { uid: u.uid, email: low(u.email), displayName: u.displayName || "", emailVerified: u.emailVerified } : null;
       onUser(this.user);
@@ -81,6 +90,7 @@ export const DB = {
     await auth.signInWithEmailAndPassword(a, email, password);
   },
   async signUp(email, password, name) {
+    await this._checkRegistration(email);
     if (this.mode === "local") return this._localLogin(email, name);
     const { auth, a } = this._fb;
     const cred = await auth.createUserWithEmailAndPassword(a, email, password);
@@ -103,7 +113,7 @@ export const DB = {
     const { auth, a } = this._fb;
     const provider = new auth.GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
-    try { await auth.signInWithPopup(a, provider); }
+    try { const cred = await auth.signInWithPopup(a, provider); await this._enforceNewUser(cred); }
     catch (e) {
       // En celulares y navegadores que bloquean ventanas emergentes se usa redirección
       if (["auth/popup-blocked", "auth/operation-not-supported-in-this-environment", "auth/cancelled-popup-request"].includes(e.code)) {
@@ -125,6 +135,41 @@ export const DB = {
     await this._fb.auth.signOut(this._fb.a);
     location.reload();
   },
+  /* ------------------------- Registro y administración ------------------------ */
+  isAdmin() {
+    const list = ADMIN_EMAILS.map(low).filter(Boolean);
+    if (!this.user) return false;
+    if (this.mode === "local") return !list.length || list.includes(this.user.email);
+    return list.includes(this.user.email) && !!this.user.emailVerified;
+  },
+  async inviteExists(email) {
+    const e = low(email);
+    if (this.mode === "local") return this._localShares().some((s) => s.viewerEmail === e);
+    try { return (await this._fb.fs.getDoc(this._fb.fs.doc(this._fb.db, "invites", e))).exists(); } catch { return false; }
+  },
+  async _checkRegistration(email) {
+    const c = this.appConfig;
+    if (c.registrationOpen !== false) return;
+    if (c.allowInvited !== false && (await this.inviteExists(email))) return;
+    const err = new Error(c.closedMessage || "El registro de nuevos usuarios está cerrado. Solicite acceso al administrador.");
+    err.code = "registro-cerrado";
+    throw err;
+  },
+  /* Si el registro está cerrado, una cuenta nueva creada con Google se elimina de inmediato */
+  async _enforceNewUser(cred) {
+    const { auth } = this._fb;
+    const info = auth.getAdditionalUserInfo(cred);
+    if (!info?.isNewUser) return;
+    try { await this._checkRegistration(cred.user.email); }
+    catch (e) { try { await cred.user.delete(); } catch { await auth.signOut(this._fb.a); } throw e; }
+  },
+  async saveAppConfig(patch) {
+    if (!this.isAdmin()) throw new Error("Solo un administrador puede cambiar esta configuración");
+    this.appConfig = { ...this.appConfig, ...patch, updatedAt: Date.now(), updatedBy: this.user.email };
+    if (this.mode === "local") return localStorage.setItem("rack21:config", JSON.stringify(this.appConfig));
+    await this._fb.fs.setDoc(this._fb.fs.doc(this._fb.db, "config", "app"), clean(this.appConfig), { merge: true });
+  },
+
   _localLogin(email, name = "") {
     const e = low(email) || "modo-local";
     this.user = { uid: `local-${e}`, email: e, displayName: name };
@@ -286,6 +331,8 @@ export const DB = {
     }
     const { fs, db } = this._fb;
     await fs.setDoc(fs.doc(db, "shares", id), rec);
+    // Marca el correo como invitado (permite registrarse aunque el registro esté cerrado)
+    try { await fs.setDoc(fs.doc(db, "invites", viewerEmail), { ownerUid: this.user.uid, updatedAt: Date.now() }); } catch (e) { console.warn("Invitación", e.code || e); }
   },
 
   /* Mantiene los accesos al día cuando la app agrega colecciones nuevas a un módulo */

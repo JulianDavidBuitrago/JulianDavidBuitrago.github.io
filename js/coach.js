@@ -13,7 +13,7 @@ import {
   today, addDays, lastNDays, sum, firstName, longDate, toISO
 } from "./utils.js";
 import {
-  AREAS, areaOf, habitScheduled, habitDone, habitStreak, habitRate, choreStatus, freqLabel,
+  AREAS, areaOf, habitScheduled, habitDone, habitStreak, habitRate, choreStatus, freqLabel, recurrenceLabel,
   minutesOn, weeklyExerciseTarget, dayScore, challenge, txFilter, totals, byCategory, byEntity, byMonth,
   level, transformation, areaBalance, taskState, durationLabel
 } from "./logic.js";
@@ -57,7 +57,7 @@ export function buildContext() {
     })),
     tareas_con_fecha: DB.data.tasks.filter((x) => x.status !== "completada").map((x) => ({ tarea: x.title, avance_actividades: x.items?.length ? `${x.items.filter((i) => i.done).length}/${x.items.length}` : null, actividades_pendientes: (x.items || []).filter((i) => !i.done).map((i) => i.text).slice(0, 8), fecha_fin: x.dueDate, estado: x.status, prioridad: x.priority, duracion: durationLabel(x), situacion: taskState(x).label })),
     tareas_completadas_30d: DB.data.tasks.filter((x) => x.status === "completada" && x.completedAt && x.completedAt > Date.now() - 30 * 864e5).length,
-    hogar: DB.data.chores.filter((c) => c.active !== false).map((c) => ({ tarea: c.name, frecuencia: freqLabel(c.freq), estado: choreStatus(c).label })),
+    hogar: DB.data.chores.filter((c) => c.active !== false).map((c) => ({ tarea: c.name, frecuencia: recurrenceLabel(c), estado: choreStatus(c).label })),
     ejercicio: {
       meta_semanal_min: weeklyExerciseTarget(),
       ultimos_7_dias_min: sum(lastNDays(7), minutesOn),

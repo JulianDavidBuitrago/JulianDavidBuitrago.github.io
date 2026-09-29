@@ -93,7 +93,8 @@ export function formModal({ title, fields, values = {}, submit = "Guardar", onSu
       default:
         input = `<input ${base} type="${f.type || "text"}" value="${esc(v)}" class="input" ${f.min !== undefined ? `min="${f.min}"` : ""} ${f.max !== undefined ? `max="${f.max}"` : ""} ${f.step ? `step="${f.step}"` : ""}>`;
     }
-    return `<div class="${f.col === "half" ? "sm:col-span-1" : "sm:col-span-2"}">
+    const when = f.when ? Object.entries(f.when)[0] : null;
+    return `<div class="${f.col === "half" ? "sm:col-span-1" : "sm:col-span-2"}" data-field="${f.name}" ${when ? `data-when="${when[0]}" data-when-in="${when[1].join(",")}"` : ""}>
       ${f.type === "checkbox" ? "" : `<label for="f_${f.name}" class="label">${esc(f.label)}${f.required ? ' <span class="text-rose-400">*</span>' : ""}</label>`}
       ${input}
       ${f.hint ? `<p class="text-xs text-slate-500 mt-1.5">${f.hint}</p>` : ""}
@@ -112,6 +113,12 @@ export function formModal({ title, fields, values = {}, submit = "Guardar", onSu
   });
   const form = m.querySelector("form");
   m.querySelector("[data-close-form]").onclick = closeModal;
+  const hiddenField = (name) => form.querySelector(`[data-field="${name}"]`)?.classList.contains("hidden");
+  const applyWhen = () => form.querySelectorAll("[data-when]").forEach((w) => {
+    const ctrl = form.querySelector(`[name="${w.dataset.when}"]`);
+    w.classList.toggle("hidden", !w.dataset.whenIn.split(",").includes(ctrl?.value));
+  });
+  form.addEventListener("change", applyWhen); applyWhen();
   form.querySelectorAll("[data-money]").forEach((inp) => inp.addEventListener("input", () => {
     const d = inp.value.replace(/\D/g, "");
     inp.value = d ? Number(d).toLocaleString("es-CO") : "";
@@ -130,6 +137,7 @@ export function formModal({ title, fields, values = {}, submit = "Guardar", onSu
         else if (f.type === "number" || f.type === "range") val = val === "" ? null : Number(val);
         out[f.name] = val;
       }
+      if (hiddenField(f.name)) continue;
       if (f.required && (out[f.name] === "" || out[f.name] === null || (f.type === "money" && !out[f.name]))) {
         const el = form.querySelector(`[name="${f.name}"]`);
         el?.classList.add("input-error"); el?.focus();

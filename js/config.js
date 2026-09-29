@@ -31,4 +31,9 @@ export const APP = {
   defaultModel: "claude-sonnet-5"
 };
 
+/* Correos con acceso al Panel administrativo (abrir o cerrar el registro).
+   Deben coincidir con la lista ADMIN_EMAILS de firestore.rules. */
+export const ADMIN_EMAILS = [
+  "julian.buitrago@ucaldas.edu.co"
+];
 export const isFirebaseConfigured = () => Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);

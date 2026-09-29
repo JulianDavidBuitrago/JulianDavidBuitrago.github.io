@@ -2,7 +2,7 @@
 import { DB } from "../store.js";
 import { today, esc, shortDate, lastNDays, addDays, sum } from "../utils.js";
 import { ic, sectionHead, empty } from "../ui.js";
-import { choreStatus, choreNextDue, choreLastDoneBefore, freqLabel, choreDueOn, choreDoneOn } from "../logic.js";
+import { choreStatus, choreNextDue, choreLastDoneBefore, recurrenceLabel, choreDueOn, choreDoneOn } from "../logic.js";
 import * as A from "../actions.js";
 
 let tab = "pendientes";
@@ -71,7 +71,7 @@ function card(c, s, t) {
       <button class="check check-lg ${done ? "is-on" : ""}" data-action="chore:toggle" data-id="${c.id}" aria-label="Marcar ${esc(c.name)}">${ic("check", "w-5 h-5")}</button>
       <div class="flex-1 min-w-0">
         <h3 class="text-white font-semibold ${done ? "line-through opacity-60" : ""}">${esc(c.name)}</h3>
-        <p class="text-xs text-slate-400 mt-0.5">${freqLabel(c.freq)} · ${c.minutes || "?"} min</p>
+        <p class="text-xs text-slate-400 mt-0.5">${ic("repeat", "w-3 h-3 inline -mt-0.5")} ${recurrenceLabel(c)} · ${c.minutes || "?"} min</p>
       </div>
       <span class="badge badge-${s.key}">${s.label}</span>
     </div>

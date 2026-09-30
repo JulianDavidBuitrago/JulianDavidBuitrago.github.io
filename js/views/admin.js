@@ -44,6 +44,7 @@ export function render() {
         <button class="btn btn-primary" type="submit">${ic("save", "w-4 h-4")}Guardar configuración</button>
         ${c.updatedAt ? `<span class="text-[11px] text-slate-500">Último cambio: ${new Date(c.updatedAt).toLocaleString("es-CO")} · ${esc(c.updatedBy || "")}</span>` : ""}
       </div>
+      <div id="adminDiag" class="hidden rounded-xl border border-rose-400/30 bg-rose-500/5 p-3 text-xs text-rose-100/90"></div>
     </form>
 
     <div class="card reveal space-y-3">
@@ -74,6 +75,17 @@ export function mount(root) {
       });
       toast(f.registrationOpen.checked ? "Registro abierto para nuevos usuarios" : "Registro cerrado. Solo entran los usuarios existentes.");
       A.changed();
-    } catch (err) { toast(err.code === "permission-denied" ? "Firebase rechazó el cambio: revise que su correo esté en isAdmin() de firestore.rules y publique las reglas." : err.message, "error"); btn.disabled = false; }
+    } catch (err) {
+      btn.disabled = false;
+      if (err.code !== "permission-denied") return toast(err.message, "error");
+      toast("Firebase rechazó el cambio. Vea el diagnóstico debajo del botón.", "error");
+      const box = root.querySelector("#adminDiag");
+      box.classList.remove("hidden");
+      box.innerHTML = `<p class="font-semibold text-rose-100 mb-1">Firebase no reconoce este correo como administrador</p>
+        <p>Correo con el que inició sesión: <code>${esc(DB.user.email)}</code> · Verificado: <strong>${DB.user.emailVerified ? "sí" : "no"}</strong></p>
+        <p class="mt-2">En Firebase → Firestore Database → Reglas, la función <code>isAdmin()</code> debe contener exactamente:</p>
+        <pre class="mt-1 p-2 rounded-lg bg-black/40 text-[11px] whitespace-pre-wrap">&& request.auth.token.email.lower() in ['${esc(DB.user.email)}'];</pre>
+        <p class="mt-2">Pulse <strong>Publicar</strong>, espere un minuto, cierre sesión, vuelva a entrar e intente de nuevo.</p>`;
+    }
   });
 }

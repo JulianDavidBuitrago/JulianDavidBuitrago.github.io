@@ -167,7 +167,14 @@ export const DB = {
     if (!this.isAdmin()) throw new Error("Solo un administrador puede cambiar esta configuración");
     this.appConfig = { ...this.appConfig, ...patch, updatedAt: Date.now(), updatedBy: this.user.email };
     if (this.mode === "local") return localStorage.setItem("rack21:config", JSON.stringify(this.appConfig));
-    await this._fb.fs.setDoc(this._fb.fs.doc(this._fb.db, "config", "app"), clean(this.appConfig), { merge: true });
+    const write = () => this._fb.fs.setDoc(this._fb.fs.doc(this._fb.db, "config", "app"), clean(this.appConfig), { merge: true });
+    try { await write(); }
+    catch (e) {
+      if (e.code !== "permission-denied") throw e;
+      // El token puede tener un estado de verificación viejo: se renueva y se reintenta una vez
+      await this._fb.a.currentUser.getIdToken(true);
+      await write();
+    }
   },
 
   _localLogin(email, name = "") {

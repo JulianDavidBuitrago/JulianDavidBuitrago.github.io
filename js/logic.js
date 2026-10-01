@@ -264,7 +264,7 @@ export function challenge() {
 export function points() {
   const d = DB.data;
   let p = d.habitLogs.length * 10 + d.choreLogs.length * 6 + d.workouts.length * 15 + d.transactions.length * 2 +
-    d.commitments.filter((c) => c.done).length * 12 + (d.tasks || []).filter((t) => t.status === "completada").length * 8 + d.goals.filter((g) => g.status === "lograda").length * 80;
+    d.commitments.filter((c) => c.done).length * 12 + (d.tasks || []).reduce((n, t) => n + (t.status === "completada" ? 1 : 0) + (t.completions?.length || 0), 0) * 8 + d.goals.filter((g) => g.status === "lograda").length * 80;
   const ch = challenge();
   if (ch) p += ch.pocketed * 30;
   return p;
@@ -378,4 +378,17 @@ export function taskState(t) {
   if (d === 0) return { key: "today", label: "Vence hoy", days: 0 };
   if (d === 1) return { key: "soon", label: "Vence mañana", days: 1 };
   return { key: d <= 7 ? "soon" : "later", label: `Faltan ${d} días`, days: d };
+}
+
+/* --------------------- Tareas recurrentes (periodicidad) ---------------- */
+export const TASK_REPEAT = [{ v: "unica", l: "Una sola vez" }, ...RECURRENCE];
+export const isRecurring = (t) => !!t.rtype && t.rtype !== "unica";
+export const taskRepeatLabel = (t) => (isRecurring(t) ? recurrenceLabel(t) : "Una sola vez");
+/* Próxima fecha después de "from" según la periodicidad de la tarea */
+export function nextTaskDate(t, from) {
+  const r = recurrence(t);
+  if (r.type === "intervalo") return addDays(from, r.every);
+  const pseudo = { rtype: t.rtype, days: t.days, every: t.every, monthDay: t.monthDay, startDate: t.repeatStart || t.dueDate || from };
+  for (let i = 1, d = addDays(from, 1); i < 400; i++, d = addDays(d, 1)) if (occursOn(pseudo, d)) return d;
+  return addDays(from, 7);
 }

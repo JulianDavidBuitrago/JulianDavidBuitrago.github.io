@@ -8,6 +8,7 @@ import { ic, icons, toast, countUp, modal, closeModal, ball } from "./ui.js";
 import { destroyCharts } from "./charts.js";
 import { level, challenge } from "./logic.js";
 import * as A from "./actions.js";
+import * as Timer from "./timer.js";
 
 import * as Home from "./views/home.js";
 import * as Habits from "./views/habits.js";
@@ -224,12 +225,16 @@ const GLOBAL = {
   "commit:toggle": (d) => A.toggleCommitment(d.id),
   "task:new": () => A.taskForm(),
   "task:toggle": (d) => A.toggleTask(d.id),
+  "timer:toggle": (d) => Timer.toggle(d.id),
+  "timer:set": (d) => Timer.setForm(d.id),
+  "timer:reset": (d) => Timer.reset(d.id),
+  "timer:add": (d) => Timer.addMinutes(d.id, 5),
   account: () => accountPicker(),
   switch: (d) => switchAccount(d.owner || null)
 };
 
 /* Acciones permitidas en modo solo lectura (navegación y consulta) */
-const RO_OK = new Set(["admin", "go", "more", "filter", "tab", "range", "open", "open-session", "history", "account", "switch", "logout", "verify:send", "verify:check", "ftab", "debt:view", "fund:view", "loan:view"]);
+const RO_OK = new Set(["admin", "view", "sort", "expand", "go", "more", "filter", "tab", "range", "open", "open-session", "history", "account", "switch", "logout", "verify:send", "verify:check", "ftab", "debt:view", "fund:view", "loan:view"]);
 
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-action]");
@@ -319,6 +324,7 @@ DB.init(async (user) => {
 /* ------------------------- Cuentas compartidas ------------------------- */
 function start() {
   document.body.classList.toggle("ro", DB.readOnly);
+  Timer.startClock();
   renderShell();
   if (!DB.readOnly && !DB.profile.onboarded) return onboarding();
   announceNewShares();

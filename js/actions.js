@@ -7,6 +7,7 @@ import { formModal, confirmDialog, toast, confetti } from "./ui.js";
 import {
   AREAS, TX_CATEGORIES, WORKOUT_TYPES, FREQUENCIES, STARTER_HABITS, STARTER_CHORES,
   TASK_STATUS, TASK_PRIORITY, DURATION_UNITS, RECURRENCE, recurrence, recurrenceLabel,
+  TASK_REPEAT, isRecurring, taskRepeatLabel, nextTaskDate,
   logId, habitDone, choreDoneOn, dayScore, challenge
 } from "./logic.js";
 import { APP } from "./config.js";
@@ -265,41 +266,84 @@ export async function startChallenge(date = today()) {
   changed();
 }
 
-/* ------------------------- Tareas únicas ---------------------------- */
+/* ------------------------------ Tareas ------------------------------ */
+const maxTaskOrder = () => DB.data.tasks.reduce((m, x) => Math.max(m, Number(x.order) || 0), 0);
+
 export function taskForm(t = null) {
+  const r = t && isRecurring(t) ? recurrence(t) : { type: "unica", days: [weekday(today())], every: 2, monthDay: Number(today().slice(8)) };
+  const rep = { rtype: t?.rtype || "unica", days: r.days, everyWeeks: r.type === "semanas" ? r.every : 2, everyDays: r.type === "intervalo" ? r.every : 3, monthDay: r.monthDay };
   formModal({
     title: t ? "Editar tarea" : "Nueva tarea",
     size: "max-w-2xl",
-    values: t || { area: "personal", priority: "media", status: "pendiente", durationUnit: "min", dueDate: today() },
+    values: t ? { ...t, ...rep } : { area: "personal", priority: "media", status: "pendiente", durationUnit: "min", dueDate: today(), ...rep },
     fields: [
       { name: "title", label: "Tarea", required: true, placeholder: "Ej.: Renovar el SOAT de la moto" },
       { name: "description", label: "Descripción", type: "textarea", rows: 2, placeholder: "Detalles, pasos o notas" },
       { name: "area", label: "Área", type: "select", options: areaOpts, col: "half" },
       { name: "priority", label: "Prioridad", type: "select", options: TASK_PRIORITY, col: "half" },
-      { name: "dueDate", label: "Fecha de finalización", type: "date", required: true, col: "half" },
+      { name: "rtype", label: "Periodo de ejecución", type: "select", options: TASK_REPEAT, hint: "Las tareas periódicas se reprograman solas al completarlas." },
+      { name: "days", label: "¿Qué días?", type: "days", when: { rtype: ["dias", "semanas"] } },
+      { name: "everyWeeks", label: "Cada cuántas semanas", type: "number", min: 1, max: 12, col: "half", when: { rtype: ["semanas"] } },
+      { name: "everyDays", label: "Cada cuántos días", type: "number", min: 1, max: 365, col: "half", when: { rtype: ["intervalo"] } },
+      { name: "monthDay", label: "Día del mes", type: "number", min: 1, max: 31, col: "half", when: { rtype: ["mensual"] } },
+      { name: "dueDate", label: "Fecha de finalización (o primera fecha)", type: "date", required: true, col: "half" },
       { name: "status", label: "Estado", type: "select", options: TASK_STATUS, col: "half" },
-      { name: "duration", label: "Duración estimada", type: "number", min: 0, step: "any", col: "half" },
+      { name: "duration", label: "Duración estimada (temporizador)", type: "number", min: 0, step: "any", col: "half" },
       { name: "durationUnit", label: "Unidad", type: "select", options: DURATION_UNITS, col: "half" }
     ],
     onSubmit: async (v) => {
-      const wasDone = t?.status === "completada";
-      if (v.status === "completada" && !wasDone) v.completedAt = Date.now();
-      if (v.status !== "completada") v.completedAt = null;
-      if (t) await DB.update("tasks", t.id, v);
-      else await DB.add("tasks", v);
-      toast(t ? "Tarea actualizada" : "Tarea creada. ¿Cuál es el primer paso?");
+      const recur = v.rtype !== "unica";
+      if (recur && ["dias", "semanas"].includes(v.rtype) && !v.days?.length) throw new Error("Elija al menos un día de la semana");
+      const rec = {
+        title: v.title, description: v.description, area: v.area, priority: v.priority, dueDate: v.dueDate, status: v.status,
+        duration: v.duration, durationUnit: v.durationUnit, rtype: v.rtype,
+        days: ["dias", "semanas"].includes(v.rtype) ? v.days : [],
+        every: Math.max(1, Number(v.rtype === "semanas" ? v.everyWeeks : v.everyDays) || 1),
+        monthDay: Math.min(31, Math.max(1, Number(v.monthDay) || 1)),
+        repeatStart: recur ? (t?.rtype === v.rtype && t?.repeatStart ? t.repeatStart : v.dueDate) : null
+      };
+      if (t && Number(t.timerTotal) && t.duration !== v.duration) rec.timerTotal = null; // la duración nueva redefine el temporizador
+      if (t) {
+        await DB.update("tasks", t.id, rec);
+        if (rec.status === "completada" && t.status !== "completada") await completeTask(DB.data.tasks.find((x) => x.id === t.id));
+      } else {
+        const created = await DB.add("tasks", { ...rec, status: rec.status === "completada" ? "pendiente" : rec.status, order: maxTaskOrder() + 1, items: [] });
+        if (rec.status === "completada") await completeTask(created);
+      }
+      toast(t ? "Tarea actualizada" : recur ? `Tarea periódica creada · ${taskRepeatLabel(rec)}` : "Tarea creada. ¿Cuál es el primer paso?");
       changed();
     }
   });
 }
 
+/* Completa una tarea. Si es periódica, guarda el cumplimiento y la reprograma para la próxima fecha. */
+export async function completeTask(t, extra = {}) {
+  if (!t) return;
+  if (!isRecurring(t)) {
+    await DB.update("tasks", t.id, { ...extra, status: "completada", completedAt: Date.now(), items: (extra.items || t.items || []).map((x) => ({ ...x, done: true })), timerState: "idle", timerLeft: null, timerEndsAt: null });
+    toast(`¡“${t.title}” completada! Una cosa menos en la mesa.`);
+    confetti();
+    return;
+  }
+  const base = t.dueDate && t.dueDate > today() ? t.dueDate : today();
+  const next = nextTaskDate(t, base);
+  const completions = [...(t.completions || []), { date: today(), at: Date.now(), due: t.dueDate || null }].slice(-120);
+  await DB.update("tasks", t.id, {
+    ...extra, completions, status: "pendiente", completedAt: null, dueDate: next, lastDoneAt: Date.now(),
+    items: (extra.items || t.items || []).map((x) => ({ ...x, done: false })),
+    timerState: "idle", timerLeft: null, timerEndsAt: null
+  });
+  confetti();
+  toast(`¡“${t.title}” cumplida! Se reprogramó para el ${shortDateES(next)}.`);
+}
+const shortDateES = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "short" }); };
+
 export async function toggleTask(id) {
   const t = DB.data.tasks.find((x) => x.id === id);
   if (!t) return;
-  const done = t.status === "completada";
-  const items = (t.items || []).map((x) => ({ ...x, done: done ? x.done : true }));
-  await DB.update("tasks", id, { status: done ? (items.some((x) => x.done) ? "en_progreso" : "pendiente") : "completada", completedAt: done ? null : Date.now(), items });
-  if (!done) toast(`¡“${t.title}” completada! Una cosa menos en la mesa.`);
+  if (t.status !== "completada") { await completeTask(t); changed(); return; }
+  const items = t.items || [];
+  await DB.update("tasks", id, { status: items.some((x) => x.done) ? "en_progreso" : "pendiente", completedAt: null });
   changed();
 }
 
@@ -308,6 +352,19 @@ export async function cycleTaskStatus(id) {
   if (!t) return;
   const order = ["pendiente", "en_progreso", "completada"];
   const next = order[(order.indexOf(t.status || "pendiente") + 1) % order.length];
-  await DB.update("tasks", id, { status: next, completedAt: next === "completada" ? Date.now() : null, items: next === "completada" ? (t.items || []).map((x) => ({ ...x, done: true })) : (t.items || []) });
+  if (next === "completada") await completeTask(t);
+  else await DB.update("tasks", id, { status: next, completedAt: null });
+  changed();
+}
+
+/* Guarda el orden manual (1..n). "ids" es el orden visible; el resto conserva su lugar relativo. */
+export async function reorderTasks(ids) {
+  const full = DB.data.tasks.slice().sort((a, b) => (Number(a.order) || 1e9) - (Number(b.order) || 1e9) || (a.createdAt || 0) - (b.createdAt || 0)).map((x) => x.id);
+  const set = new Set(ids);
+  const slots = full.map((id, i) => (set.has(id) ? i : -1)).filter((i) => i >= 0);
+  slots.forEach((slot, k) => { full[slot] = ids[k]; });
+  const jobs = [];
+  full.forEach((id, i) => { const t = DB.data.tasks.find((x) => x.id === id); if (t && Number(t.order) !== i + 1) jobs.push(DB.update("tasks", id, { order: i + 1 })); });
+  await Promise.all(jobs);
   changed();
 }

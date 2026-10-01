@@ -55,7 +55,7 @@ export function buildContext() {
       version_2_min: h.twoMin || "", hoy: habitScheduled(h, t) ? (habitDone(h, t) ? "hecho" : "pendiente") : "no programado",
       racha: habitStreak(h), cumplimiento_21d: Math.round(habitRate(h, d21) ?? 0)
     })),
-    tareas_con_fecha: DB.data.tasks.filter((x) => x.status !== "completada").map((x) => ({ tarea: x.title, avance_actividades: x.items?.length ? `${x.items.filter((i) => i.done).length}/${x.items.length}` : null, actividades_pendientes: (x.items || []).filter((i) => !i.done).map((i) => i.text).slice(0, 8), fecha_fin: x.dueDate, estado: x.status, prioridad: x.priority, duracion: durationLabel(x), situacion: taskState(x).label })),
+    tareas_con_fecha: DB.data.tasks.filter((x) => x.status !== "completada").sort((a, b) => (a.order || 1e9) - (b.order || 1e9)).map((x) => ({ posicion: x.order || null, tarea: x.title, periodicidad: x.rtype && x.rtype !== "unica" ? recurrenceLabel(x) : "única", veces_cumplida: x.completions?.length || 0, avance_actividades: x.items?.length ? `${x.items.filter((i) => i.done).length}/${x.items.length}` : null, actividades_pendientes: (x.items || []).filter((i) => !i.done).map((i) => i.text).slice(0, 8), fecha_fin: x.dueDate, estado: x.status, prioridad: x.priority, duracion: durationLabel(x), situacion: taskState(x).label })),
     tareas_completadas_30d: DB.data.tasks.filter((x) => x.status === "completada" && x.completedAt && x.completedAt > Date.now() - 30 * 864e5).length,
     hogar: DB.data.chores.filter((c) => c.active !== false).map((c) => ({ tarea: c.name, frecuencia: recurrenceLabel(c), estado: choreStatus(c).label })),
     ejercicio: {

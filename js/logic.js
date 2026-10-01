@@ -117,11 +117,12 @@ export const RECURRENCE = [
   { v: "dias", l: "Días específicos de la semana" },
   { v: "semanas", l: "Cada N semanas (en los días elegidos)" },
   { v: "mensual", l: "Una vez al mes (día fijo)" },
+  { v: "anual", l: "Una vez al año (fecha fija)" },
   { v: "intervalo", l: "Cada N días desde la última vez" }
 ];
 
 export function recurrence(c) {
-  if (c.rtype) return { type: c.rtype, days: (c.days || []).map(Number), every: Math.max(1, Number(c.every || 1)), monthDay: Math.min(31, Math.max(1, Number(c.monthDay || 1))) };
+  if (c.rtype) return { type: c.rtype, days: (c.days || []).map(Number), every: Math.max(1, Number(c.every || 1)), monthDay: Math.min(31, Math.max(1, Number(c.monthDay || 1))), month: Math.min(12, Math.max(1, Number(c.month || 1))) };
   const f = Number(c.freq || 1), start = createdISO(c), wd = weekday(start);
   if (f <= 1) return { type: "diaria", days: [], every: 1, monthDay: 1 };
   if (f === 7) return { type: "dias", days: [wd], every: 1, monthDay: 1 };
@@ -130,6 +131,7 @@ export function recurrence(c) {
   return { type: "intervalo", days: [], every: f, monthDay: 1 };
 }
 
+export const MONTH_NAMES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
 const joinY = (a) => (a.length > 1 ? `${a.slice(0, -1).join(", ")} y ${a[a.length - 1]}` : a[0] || "");
 export function recurrenceLabel(c) {
@@ -140,6 +142,7 @@ export function recurrenceLabel(c) {
     case "dias": return dn.length === 7 ? "Todos los días" : dn.length ? `Cada ${joinY(dn)}` : "Sin días elegidos";
     case "semanas": return `Cada ${r.every} semanas · ${joinY(dn) || "sin día"}`;
     case "mensual": return `Cada mes · día ${r.monthDay}`;
+    case "anual": return `Cada año · ${r.monthDay} de ${MONTH_NAMES[r.month - 1]}`;
     default: return r.every === 1 ? "Todos los días" : `Cada ${r.every} días`;
   }
 }
@@ -162,6 +165,7 @@ export function occursOn(c, date) {
       return w % r.every === 0;
     }
     case "mensual": return Number(date.slice(8)) === Math.min(r.monthDay, lastDayOfMonth(date));
+    case "anual": return Number(date.slice(5, 7)) === r.month && Number(date.slice(8)) === Math.min(r.monthDay, lastDayOfMonth(date));
     default: return false;
   }
 }
@@ -388,7 +392,7 @@ export const taskRepeatLabel = (t) => (isRecurring(t) ? recurrenceLabel(t) : "Un
 export function nextTaskDate(t, from) {
   const r = recurrence(t);
   if (r.type === "intervalo") return addDays(from, r.every);
-  const pseudo = { rtype: t.rtype, days: t.days, every: t.every, monthDay: t.monthDay, startDate: t.repeatStart || t.dueDate || from };
+  const pseudo = { rtype: t.rtype, days: t.days, every: t.every, monthDay: t.monthDay, month: t.month, startDate: t.repeatStart || t.dueDate || from };
   for (let i = 1, d = addDays(from, 1); i < 400; i++, d = addDays(d, 1)) if (occursOn(pseudo, d)) return d;
   return addDays(from, 7);
 }

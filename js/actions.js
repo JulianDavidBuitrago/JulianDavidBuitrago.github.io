@@ -7,7 +7,7 @@ import { formModal, confirmDialog, toast, confetti } from "./ui.js";
 import {
   AREAS, TX_CATEGORIES, WORKOUT_TYPES, FREQUENCIES, STARTER_HABITS, STARTER_CHORES,
   TASK_STATUS, TASK_PRIORITY, DURATION_UNITS, RECURRENCE, recurrence, recurrenceLabel,
-  TASK_REPEAT, isRecurring, taskRepeatLabel, nextTaskDate,
+  TASK_REPEAT, isRecurring, taskRepeatLabel, nextTaskDate, MONTH_NAMES,
   logId, habitDone, choreDoneOn, dayScore, challenge
 } from "./logic.js";
 import { APP } from "./config.js";
@@ -81,7 +81,7 @@ export async function seedStarter({ habits = true, chores = true } = {}) {
 /* ------------------------------- Hogar ------------------------------- */
 export function choreForm(c = null) {
   const r = c ? recurrence(c) : { type: "dias", days: [weekday(today())], every: 2, monthDay: Number(today().slice(8)) };
-  const base = { rtype: r.type, days: r.days, everyWeeks: r.type === "semanas" ? r.every : 2, everyDays: r.type === "intervalo" ? r.every : 3, monthDay: r.monthDay };
+  const base = { rtype: r.type, days: r.days, everyWeeks: r.type === "semanas" ? r.every : 2, everyDays: r.type === "intervalo" ? r.every : 3, monthDay: r.monthDay, month: r.month || Number(today().slice(5, 7)) };
   const vals = c ? { ...c, ...base } : { ...base, minutes: 15 };
   formModal({
     title: c ? "Editar tarea del hogar" : "Nueva tarea del hogar",
@@ -92,13 +92,14 @@ export function choreForm(c = null) {
       { name: "days", label: "¿Qué días?", type: "days", when: { rtype: ["dias", "semanas"] }, hint: "Ej.: sacar la basura miércoles y sábado." },
       { name: "everyWeeks", label: "Cada cuántas semanas", type: "number", min: 1, max: 12, col: "half", when: { rtype: ["semanas"] } },
       { name: "everyDays", label: "Cada cuántos días", type: "number", min: 1, max: 90, col: "half", when: { rtype: ["intervalo"] } },
-      { name: "monthDay", label: "Día del mes", type: "number", min: 1, max: 31, col: "half", when: { rtype: ["mensual"] }, hint: "Si el mes es más corto, se programa el último día." },
+      { name: "month", label: "Mes", type: "select", options: MONTH_NAMES.map((m, i) => ({ v: i + 1, l: m[0].toUpperCase() + m.slice(1) })), col: "half", when: { rtype: ["anual"] } },
+      { name: "monthDay", label: "Día del mes", type: "number", min: 1, max: 31, col: "half", when: { rtype: ["mensual", "anual"] }, hint: "Si el mes es más corto, se programa el último día." },
       { name: "minutes", label: "Minutos estimados", type: "number", min: 1, col: "half" },
       { name: "anchor", label: "Ancla · Después de…", placeholder: "Ej.: poner la lavadora", hint: "Enganche la tarea a algo que ya hace para no tener que acordarse." }
     ],
     onSubmit: async (v) => {
       if (["dias", "semanas"].includes(v.rtype) && !v.days?.length) throw new Error("Elija al menos un día de la semana");
-      const rec = { name: v.name, rtype: v.rtype, days: ["dias", "semanas"].includes(v.rtype) ? v.days : [], every: Math.max(1, Number(v.rtype === "semanas" ? v.everyWeeks : v.everyDays) || 1), monthDay: Math.min(31, Math.max(1, Number(v.monthDay) || 1)), minutes: v.minutes, anchor: v.anchor, freq: null };
+      const rec = { name: v.name, rtype: v.rtype, days: ["dias", "semanas"].includes(v.rtype) ? v.days : [], every: Math.max(1, Number(v.rtype === "semanas" ? v.everyWeeks : v.everyDays) || 1), monthDay: Math.min(31, Math.max(1, Number(v.monthDay) || 1)), month: Math.min(12, Math.max(1, Number(v.month) || 1)), minutes: v.minutes, anchor: v.anchor, freq: null };
       if (c) await DB.update("chores", c.id, rec);
       else await DB.add("chores", { ...rec, active: true, startDate: today() });
       toast(c ? "Tarea actualizada" : `Tarea creada · ${recurrenceLabel(rec)}`);
@@ -271,7 +272,7 @@ const maxTaskOrder = () => DB.data.tasks.reduce((m, x) => Math.max(m, Number(x.o
 
 export function taskForm(t = null) {
   const r = t && isRecurring(t) ? recurrence(t) : { type: "unica", days: [weekday(today())], every: 2, monthDay: Number(today().slice(8)) };
-  const rep = { rtype: t?.rtype || "unica", days: r.days, everyWeeks: r.type === "semanas" ? r.every : 2, everyDays: r.type === "intervalo" ? r.every : 3, monthDay: r.monthDay };
+  const rep = { rtype: t?.rtype || "unica", days: r.days, everyWeeks: r.type === "semanas" ? r.every : 2, everyDays: r.type === "intervalo" ? r.every : 3, monthDay: r.monthDay, month: r.month || Number(today().slice(5, 7)) };
   formModal({
     title: t ? "Editar tarea" : "Nueva tarea",
     size: "max-w-2xl",
@@ -285,7 +286,8 @@ export function taskForm(t = null) {
       { name: "days", label: "¿Qué días?", type: "days", when: { rtype: ["dias", "semanas"] } },
       { name: "everyWeeks", label: "Cada cuántas semanas", type: "number", min: 1, max: 12, col: "half", when: { rtype: ["semanas"] } },
       { name: "everyDays", label: "Cada cuántos días", type: "number", min: 1, max: 365, col: "half", when: { rtype: ["intervalo"] } },
-      { name: "monthDay", label: "Día del mes", type: "number", min: 1, max: 31, col: "half", when: { rtype: ["mensual"] } },
+      { name: "month", label: "Mes", type: "select", options: MONTH_NAMES.map((m, i) => ({ v: i + 1, l: m[0].toUpperCase() + m.slice(1) })), col: "half", when: { rtype: ["anual"] } },
+      { name: "monthDay", label: "Día del mes", type: "number", min: 1, max: 31, col: "half", when: { rtype: ["mensual", "anual"] } },
       { name: "dueDate", label: "Fecha de finalización (o primera fecha)", type: "date", required: true, col: "half" },
       { name: "status", label: "Estado", type: "select", options: TASK_STATUS, col: "half" },
       { name: "duration", label: "Duración estimada (temporizador)", type: "number", min: 0, step: "any", col: "half" },
@@ -300,6 +302,7 @@ export function taskForm(t = null) {
         days: ["dias", "semanas"].includes(v.rtype) ? v.days : [],
         every: Math.max(1, Number(v.rtype === "semanas" ? v.everyWeeks : v.everyDays) || 1),
         monthDay: Math.min(31, Math.max(1, Number(v.monthDay) || 1)),
+        month: Math.min(12, Math.max(1, Number(v.month) || 1)),
         repeatStart: recur ? (t?.rtype === v.rtype && t?.repeatStart ? t.repeatStart : v.dueDate) : null
       };
       if (t && Number(t.timerTotal) && t.duration !== v.duration) rec.timerTotal = null; // la duración nueva redefine el temporizador
